@@ -291,6 +291,12 @@ export async function removeTeamMemberFromJob(employeeId, jobId, lineId) {
   return insertEvent({ employee_id: employeeId, job_id: jobId, event_type: 'PAUSE', line_id: lineId })
 }
 
+// Permanently remove a team member from a job (COMPLETE for that person only).
+// Does NOT update jobs.status — this is a per-employee action, not a job completion.
+export async function removeTeamMemberPermanently(employeeId, jobId, lineId) {
+  return insertEvent({ employee_id: employeeId, job_id: jobId, event_type: 'COMPLETE', line_id: lineId })
+}
+
 // ── Find an employee by badge code (for team scanning in Assembly) ─────────────
 
 export async function findTeamMember(badgeCode) {
