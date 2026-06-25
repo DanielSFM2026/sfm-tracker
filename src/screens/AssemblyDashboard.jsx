@@ -6,6 +6,7 @@ import {
   findTeamMember,
   addTeamMemberToJob,
   removeTeamMemberFromJob,
+  removeTeamMemberPermanently,
   logAssemblyTeamEvent,
   getManagerLineSplitCount,
   prepareManagerLineStart,
@@ -58,13 +59,25 @@ function ConfirmCompleteModal({ job, onConfirm, onCancel }) {
 }
 
 // ── Team edit modal ───────────────────────────────────────────────────────────
-function TeamEditModal({ job, lineId, managerId, onAdd, onRemove, onClose }) {
+// Scan behaviour:
+//   New badge      → add to job (START)
+//   Active member  → clock them off for now (PAUSE)
+//   Clocked-off    → clock them back on (START)
+// ✕ button = permanent remove (COMPLETE for that person, they leave the team entirely)
+
+function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePermanently, onClose }) {
   const inputRef  = useRef(null)
   const bufferRef = useRef('')
   const [scanning, setScanning] = useState(false)
   const [error, setError]       = useState('')
 
-  const activeTeam = (job.team ?? []).filter(m => isJobActive(m.events))
+  // Members who haven't been permanently removed (last event ≠ COMPLETE)
+  const visibleTeam = (job.team ?? []).filter(m => {
+    const last = m.events?.[m.events.length - 1]
+    return last?.event_type !== 'COMPLETE'
+  })
+  const activeMembers    = visibleTeam.filter(m => isJobActive(m.events))
+  const clockedOffMembers = visibleTeam.filter(m => !isJobActive(m.events))
 
   useEffect(() => {
     if (inputRef.current) inputRef.current.focus()
@@ -78,10 +91,31 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onRemove, onClose }) {
       const member = await findTeamMember(badgeCode)
       if (!member) { setError(`Badge not recognised: ${badgeCode}`); return }
       if (member.employee_id === managerId) { setError("That's your own badge."); return }
-      if (activeTeam.some(m => m.employee_id === member.employee_id)) {
-        setError(`${member.full_name} is already on this job.`)
+
+      // Check if already on this job
+      const existing = job.team?.find(m => m.employee_id === member.employee_id)
+      const lastEv   = existing?.events?.[existing.events.length - 1]
+
+      if (existing && lastEv?.event_type === 'COMPLETE') {
+        setError(`${member.full_name} has been permanently removed from this job.`)
         return
       }
+
+      if (existing && isJobActive(existing.events)) {
+        // Currently on shift → clock them off
+        const pauseEv = await removeTeamMemberFromJob(member.employee_id, job.job_id, lineId)
+        onClockOff(job.job_id, member.employee_id, pauseEv)
+        return
+      }
+
+      if (existing) {
+        // Clocked off → clock them back on
+        const startEv = await addTeamMemberToJob(member.employee_id, job.job_id, lineId)
+        onClockOff(job.job_id, member.employee_id, startEv) // reuses same updater (adds event)
+        return
+      }
+
+      // New member → add to job
       const startEv = await addTeamMemberToJob(member.employee_id, job.job_id, lineId)
       onAdd(job.job_id, {
         employee_id: member.employee_id,
@@ -99,10 +133,10 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onRemove, onClose }) {
     }
   }
 
-  async function handleRemove(member) {
+  async function handleRemovePermanently(member) {
     try {
-      const pauseEv = await removeTeamMemberFromJob(member.employee_id, job.job_id, lineId)
-      onRemove(job.job_id, member.employee_id, pauseEv)
+      const ev = await removeTeamMemberPermanently(member.employee_id, job.job_id, lineId)
+      onRemovePermanently(job.job_id, member.employee_id, ev)
     } catch (err) {
       console.error(err)
       setError('Remove failed — check connection.')
@@ -112,7 +146,7 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onRemove, onClose }) {
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-6">
       <div className="bg-stone-800 border border-stone-600 rounded-2xl p-8 w-full max-w-sm">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-5">
           <div>
             <p className="text-xs text-stone-500 uppercase tracking-widest">Team — PO {job.po_number}</p>
             <p className="text-sm text-stone-400">{job.part_number}</p>
@@ -120,36 +154,68 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onRemove, onClose }) {
           <button className="btn-ghost px-4 py-2" onClick={onClose}>Done</button>
         </div>
 
-        {activeTeam.length === 0 ? (
-          <p className="text-stone-600 text-sm mb-4">No team members on this job yet.</p>
-        ) : (
-          <div className="flex flex-wrap gap-2 mb-4">
-            {activeTeam.map(m => (
-              <span
-                key={m.employee_id}
-                className="flex items-center gap-2 bg-stone-700 rounded-full px-3 py-1.5 text-sm text-stone-200"
-              >
-                {m.full_name}
-                <button
-                  className="text-stone-500 hover:text-red-400 leading-none text-base"
-                  onClick={() => handleRemove(m)}
+        {/* Currently on shift */}
+        {activeMembers.length > 0 && (
+          <div className="mb-3">
+            <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">On shift</p>
+            <div className="flex flex-wrap gap-2">
+              {activeMembers.map(m => (
+                <span
+                  key={m.employee_id}
+                  className="flex items-center gap-2 bg-stone-700 rounded-full px-3 py-1.5 text-sm text-stone-200"
                 >
-                  ✕
-                </button>
-              </span>
-            ))}
+                  {m.full_name}
+                  <button
+                    className="text-stone-500 hover:text-red-400 leading-none text-base"
+                    title="Permanently remove from job"
+                    onClick={() => handleRemovePermanently(m)}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
           </div>
         )}
 
-        <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Scan badge to add member</p>
+        {/* Clocked off */}
+        {clockedOffMembers.length > 0 && (
+          <div className="mb-4">
+            <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Clocked off</p>
+            <div className="flex flex-wrap gap-2">
+              {clockedOffMembers.map(m => (
+                <span
+                  key={m.employee_id}
+                  className="flex items-center gap-2 bg-stone-800 border border-stone-700 rounded-full px-3 py-1.5 text-sm text-stone-500"
+                >
+                  {m.full_name}
+                  <button
+                    className="text-stone-600 hover:text-red-500 leading-none text-base"
+                    title="Permanently remove from job"
+                    onClick={() => handleRemovePermanently(m)}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+            <p className="text-xs text-stone-600 mt-2">Scan their badge to clock back on</p>
+          </div>
+        )}
+
+        {visibleTeam.length === 0 && (
+          <p className="text-stone-600 text-sm mb-4">No team members on this job yet.</p>
+        )}
+
+        <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Scan badge</p>
         <div className="relative">
           <input
             ref={inputRef}
             type="text"
-            className="w-full bg-stone-800 border-2 border-stone-600 focus:border-sky-500
+            className="w-full bg-stone-900 border-2 border-stone-600 focus:border-sky-500
                        rounded-xl px-4 py-3 text-stone-100 text-lg outline-none
                        transition-colors placeholder-stone-600"
-            placeholder={scanning ? 'Looking up…' : '▌ Scan badge'}
+            placeholder={scanning ? 'Looking up…' : '▌ Add · Clock on/off'}
             autoComplete="off"
             autoCorrect="off"
             spellCheck={false}
@@ -180,16 +246,22 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onRemove, onClose }) {
 function AssemblyJobCard({ job, managerName, breakRules, onPause, onHold, onResume, onComplete, onEditTeam }) {
   const active     = isJobActive(job.events)
   const lastPause  = [...job.events].reverse().find(e => e.event_type === 'PAUSE')
-  const isOnHold   = !active && !!lastPause?.hold_reason   // fault/quality hold
-  const isPaused   = !active && !lastPause?.hold_reason    // routine pause
+  const isOnHold   = !active && !!lastPause?.hold_reason
   const holdReason = isOnHold ? lastPause.hold_reason : null
-  const activeTeam = (job.team ?? []).filter(m => isJobActive(m.events))
 
-  const anyActive = active || (job.team ?? []).some(m => isJobActive(m.events))
+  // Members who haven't been permanently removed (last event ≠ COMPLETE)
+  const visibleTeam   = (job.team ?? []).filter(m => {
+    const last = m.events?.[m.events.length - 1]
+    return last?.event_type !== 'COMPLETE'
+  })
+  const activeTeam    = visibleTeam.filter(m => isJobActive(m.events))
+  const clockedOffTeam = visibleTeam.filter(m => !isJobActive(m.events))
+
+  const anyActive = active || visibleTeam.some(m => isJobActive(m.events))
 
   function computeTotal() {
     const managerMs = calcElapsed(job.events, breakRules)
-    const teamMs    = (job.team ?? []).reduce((sum, m) => sum + calcElapsed(m.events, breakRules), 0)
+    const teamMs    = visibleTeam.reduce((sum, m) => sum + calcElapsed(m.events, breakRules), 0)
     return managerMs + teamMs
   }
 
@@ -233,7 +305,7 @@ function AssemblyJobCard({ job, managerName, breakRules, onPause, onHold, onResu
               {formatDuration(elapsed)}
             </p>
             {active && activeTeam.length > 0 && (
-              <p className="text-xs text-sky-400 mt-0.5">{activeTeam.length + 1} people</p>
+              <p className="text-xs text-sky-400 mt-0.5">{activeTeam.length + 1} on shift</p>
             )}
             {holdReason && (
               <p className="text-xs text-orange-400 mt-1 max-w-[140px] text-right leading-tight">
@@ -253,7 +325,7 @@ function AssemblyJobCard({ job, managerName, breakRules, onPause, onHold, onResu
               <span>{managerName}</span>
             </span>
           </div>
-          {/* Team row */}
+          {/* Team row — bright = on shift, dim = clocked off */}
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => onEditTeam(job.job_id)}
@@ -262,14 +334,25 @@ function AssemblyJobCard({ job, managerName, breakRules, onPause, onHold, onResu
             >
               ✏ Team
             </button>
-            {activeTeam.length === 0 ? (
+            {visibleTeam.length === 0 ? (
               <span className="text-xs text-stone-600">No members assigned</span>
             ) : (
-              activeTeam.map(m => (
-                <span key={m.employee_id} className="text-xs bg-stone-700 text-stone-300 rounded-full px-2.5 py-1">
-                  {m.full_name}
-                </span>
-              ))
+              visibleTeam.map(m => {
+                const on = isJobActive(m.events)
+                return (
+                  <span
+                    key={m.employee_id}
+                    className={`text-xs rounded-full px-2.5 py-1 ${
+                      on
+                        ? 'bg-stone-700 text-stone-300'
+                        : 'bg-stone-800 border border-stone-700 text-stone-600'
+                    }`}
+                    title={on ? 'On shift' : 'Clocked off'}
+                  >
+                    {m.full_name}
+                  </span>
+                )
+              })
             )}
           </div>
         </div>
@@ -388,22 +471,28 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
     ))
   }
 
-  // Fire an event for manager + all currently-active team members on a job.
-  // Also updates team member events in local state so timers respond immediately.
+  // Fire an event for the manager and optionally team members.
+  //
+  //   PAUSE (routine / end of shift)  → manager only; team members clock off individually
+  //   PAUSE (hold reason present)     → manager + all active team (whole line stops)
+  //   RESUME                          → manager only; team members rejoin via scan
+  //   COMPLETE                        → manager + all active team (job fully done)
+  //
   async function fireTeamEvent(jobId, eventType, holdReason = null, managerSplitCount = 1) {
-    const job        = jobs.find(j => j.job_id === jobId)
-    const activeTeam = (job.team ?? []).filter(m => isJobActive(m.events))
-    const teamIds    = activeTeam.map(m => m.employee_id)
+    const job = jobs.find(j => j.job_id === jobId)
+
+    const includeTeam = (eventType === 'PAUSE' && !!holdReason) || eventType === 'COMPLETE'
+    const teamIds = includeTeam
+      ? (job.team ?? []).filter(m => isJobActive(m.events)).map(m => m.employee_id)
+      : []
 
     const managerEv = await logAssemblyTeamEvent(
       employee.employee_id, teamIds, jobId, eventType,
       selectedLine.line_id, holdReason, managerSplitCount
     )
 
-    // Update manager's timeline events
     appendJobEvent(jobId, managerEv)
 
-    // Update each team member's events so their individual timers update
     if (teamIds.length > 0) {
       setJobs(prev => prev.map(j =>
         j.job_id !== jobId ? j : {
@@ -527,21 +616,35 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
     setModal({ type: 'team', jobId })
   }
 
-  // member includes {employee_id, full_name, badge_code, events: [startEv]}
+  // New member added to job (never been on it before)
   function handleTeamAdd(jobId, member) {
     setJobs(prev => prev.map(j =>
       j.job_id === jobId ? { ...j, team: [...(j.team ?? []), member] } : j
     ))
   }
 
-  // Adds the pauseEv to the member's events so their timer stops immediately
-  function handleTeamRemove(jobId, employeeId, pauseEv) {
+  // Clock on/off toggle: append the new event (PAUSE or START) to member's events
+  function handleTeamClockToggle(jobId, employeeId, ev) {
     setJobs(prev => prev.map(j =>
       j.job_id !== jobId ? j : {
         ...j,
         team: (j.team ?? []).map(m =>
           m.employee_id === employeeId
-            ? { ...m, events: [...(m.events ?? []), pauseEv] }
+            ? { ...m, events: [...(m.events ?? []), ev] }
+            : m
+        )
+      }
+    ))
+  }
+
+  // Permanent remove: append COMPLETE event to member's events (hides them from team strip)
+  function handleTeamRemovePermanently(jobId, employeeId, ev) {
+    setJobs(prev => prev.map(j =>
+      j.job_id !== jobId ? j : {
+        ...j,
+        team: (j.team ?? []).map(m =>
+          m.employee_id === employeeId
+            ? { ...m, events: [...(m.events ?? []), ev] }
             : m
         )
       }
@@ -667,7 +770,8 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
           lineId={selectedLine.line_id}
           managerId={employee.employee_id}
           onAdd={handleTeamAdd}
-          onRemove={handleTeamRemove}
+          onClockOff={handleTeamClockToggle}
+          onRemovePermanently={handleTeamRemovePermanently}
           onClose={() => setModal(null)}
         />
       )}
