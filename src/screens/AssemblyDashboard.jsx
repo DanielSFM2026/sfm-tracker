@@ -177,13 +177,14 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onRemove, onClose }) {
 // Team members always have split_count=1 (they're only ever on one job at a time).
 // Rate example: manager on 2 lines + 2 team members → 0.5 + 1 + 1 = 2.5 s/s per job.
 
-function AssemblyJobCard({ job, breakRules, onHold, onResume, onComplete, onEditTeam }) {
+function AssemblyJobCard({ job, managerName, breakRules, onPause, onHold, onResume, onComplete, onEditTeam }) {
   const active     = isJobActive(job.events)
   const lastPause  = [...job.events].reverse().find(e => e.event_type === 'PAUSE')
-  const holdReason = active ? null : lastPause?.hold_reason
+  const isOnHold   = !active && !!lastPause?.hold_reason   // fault/quality hold
+  const isPaused   = !active && !lastPause?.hold_reason    // routine pause
+  const holdReason = isOnHold ? lastPause.hold_reason : null
   const activeTeam = (job.team ?? []).filter(m => isJobActive(m.events))
 
-  // Any member (or manager) still active means the timer should tick
   const anyActive = active || (job.team ?? []).some(m => isJobActive(m.events))
 
   function computeTotal() {
@@ -201,6 +202,14 @@ function AssemblyJobCard({ job, breakRules, onHold, onResume, onComplete, onEdit
     return () => clearInterval(id)
   }, [anyActive, job.events, job.team, breakRules])
 
+  // Status badge label + colour
+  const statusLabel = active ? 'On Line' : isOnHold ? 'On Hold' : 'Paused'
+  const statusCls   = active
+    ? 'bg-amber-500/20 text-amber-400'
+    : isOnHold
+      ? 'bg-orange-900/40 text-orange-400'
+      : 'bg-stone-700 text-stone-400'
+
   return (
     <div className={`rounded-2xl border-2 transition-colors overflow-hidden ${
       active ? 'bg-stone-800 border-amber-500' : 'border-stone-700'
@@ -217,10 +226,8 @@ function AssemblyJobCard({ job, breakRules, onHold, onResume, onComplete, onEdit
             )}
           </div>
           <div className="text-right shrink-0">
-            <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold uppercase mb-2 ${
-              active ? 'bg-amber-500/20 text-amber-400' : 'bg-orange-900/40 text-orange-400'
-            }`}>
-              {active ? 'On Line' : 'On Hold'}
+            <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold uppercase mb-2 ${statusCls}`}>
+              {statusLabel}
             </span>
             <p className={`text-2xl font-mono font-bold ${active ? 'text-amber-400' : 'text-stone-400'}`}>
               {formatDuration(elapsed)}
@@ -236,38 +243,58 @@ function AssemblyJobCard({ job, breakRules, onHold, onResume, onComplete, onEdit
           </div>
         </div>
 
-        {/* Team strip */}
-        <div className="mt-3 flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => onEditTeam(job.job_id)}
-            className="text-xs text-stone-500 hover:text-sky-400 border border-stone-700
-                       hover:border-sky-600 rounded-full px-2.5 py-1 transition-colors"
-          >
-            ✏ Team
-          </button>
-          {activeTeam.length === 0 ? (
-            <span className="text-xs text-stone-600">No members assigned</span>
-          ) : (
-            activeTeam.map(m => (
-              <span key={m.employee_id} className="text-xs bg-stone-700 text-stone-300 rounded-full px-2.5 py-1">
-                {m.full_name}
-              </span>
-            ))
-          )}
+        {/* LM chip + Team strip */}
+        <div className="mt-3 space-y-2">
+          {/* Line manager row */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs bg-amber-500/15 border border-amber-500/30 text-amber-400
+                             rounded-full px-2.5 py-1 flex items-center gap-1.5">
+              <span className="font-semibold tracking-wide">LM</span>
+              <span>{managerName}</span>
+            </span>
+          </div>
+          {/* Team row */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => onEditTeam(job.job_id)}
+              className="text-xs text-stone-500 hover:text-sky-400 border border-stone-700
+                         hover:border-sky-600 rounded-full px-2.5 py-1 transition-colors"
+            >
+              ✏ Team
+            </button>
+            {activeTeam.length === 0 ? (
+              <span className="text-xs text-stone-600">No members assigned</span>
+            ) : (
+              activeTeam.map(m => (
+                <span key={m.employee_id} className="text-xs bg-stone-700 text-stone-300 rounded-full px-2.5 py-1">
+                  {m.full_name}
+                </span>
+              ))
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="flex gap-3 px-5 pb-5">
+      {/* Action buttons */}
+      <div className="px-5 pb-5 space-y-2">
         {active ? (
-          <button className="btn-secondary flex-1" onClick={() => onHold(job.job_id)}>
-            ⏸ Hold
-          </button>
+          <div className="flex gap-2">
+            <button className="btn-secondary flex-1 text-base py-3" onClick={() => onPause(job.job_id)}>
+              ⏸ Pause
+            </button>
+            <button
+              className="flex-1 text-base py-3 btn rounded-xl border border-orange-700 bg-orange-950/40 text-orange-400"
+              onClick={() => onHold(job.job_id)}
+            >
+              ⚠ Hold
+            </button>
+          </div>
         ) : (
-          <button className="btn-primary flex-1" onClick={() => onResume(job.job_id)}>
+          <button className="btn-primary w-full text-base py-3" onClick={() => onResume(job.job_id)}>
             ▶ Resume
           </button>
         )}
-        <button className="btn-green flex-1" onClick={() => onComplete(job.job_id)}>
+        <button className="btn-green w-full text-base py-3" onClick={() => onComplete(job.job_id)}>
           ✓ Complete
         </button>
       </div>
@@ -434,6 +461,18 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
   }
 
   // ── Card actions ───────────────────────────────────────────────────────────
+
+  // Routine pause (end of shift, break) — no reason needed
+  async function handlePause(jobId) {
+    try {
+      await fireTeamEvent(jobId, 'PAUSE', null, 1)
+    } catch (err) {
+      console.error(err)
+      setError('Pause failed.')
+    }
+  }
+
+  // Fault/quality hold — requires a reason
   function handleHold(jobId) {
     setModal({ type: 'hold', jobId })
   }
@@ -599,7 +638,9 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
             <AssemblyJobCard
               key={job.job_id}
               job={job}
+              managerName={employee.full_name}
               breakRules={breakRules}
+              onPause={handlePause}
               onHold={handleHold}
               onResume={handleResume}
               onComplete={handleComplete}
