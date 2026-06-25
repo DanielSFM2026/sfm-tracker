@@ -7,6 +7,9 @@ import {
   addTeamMemberToJob,
   removeTeamMemberFromJob,
   logAssemblyTeamEvent,
+  getManagerLineSplitCount,
+  prepareManagerLineStart,
+  onManagerLineEnd,
   fetchBreakRules
 } from '../lib/db'
 import { isJobActive, calcElapsed, formatDuration } from '../lib/timeCalc'
@@ -33,12 +36,12 @@ function HoldModal({ onSelect, onCancel }) {
   )
 }
 
-// ── Confirm finish modal ──────────────────────────────────────────────────────
+// ── Confirm complete modal ────────────────────────────────────────────────────
 function ConfirmCompleteModal({ job, onConfirm, onCancel }) {
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-6">
       <div className="bg-stone-800 border border-stone-600 rounded-2xl p-8 w-full max-w-sm">
-        <h2 className="text-2xl font-bold text-stone-100 mb-2 text-center">Mark Completeed?</h2>
+        <h2 className="text-2xl font-bold text-stone-100 mb-2 text-center">Mark Complete?</h2>
         <p className="text-stone-400 text-center mb-1">
           PO: <strong className="text-stone-200">{job.po_number}</strong>
         </p>
@@ -61,6 +64,8 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onRemove, onClose }) {
   const [scanning, setScanning] = useState(false)
   const [error, setError]       = useState('')
 
+  const activeTeam = (job.team ?? []).filter(m => isJobActive(m.events))
+
   useEffect(() => {
     if (inputRef.current) inputRef.current.focus()
   }, [])
@@ -68,27 +73,22 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onRemove, onClose }) {
   async function handleScan(badgeCode) {
     setError('')
     if (!badgeCode) return
-    if (badgeCode === job.team?.find(m => m.badge_code === badgeCode)?.badge_code) {
-      setError(`${badgeCode} is already on this job.`)
-      return
-    }
     setScanning(true)
     try {
       const member = await findTeamMember(badgeCode)
-      if (!member) {
-        setError(`Badge not recognised: ${badgeCode}`)
-        return
-      }
-      if (member.employee_id === managerId) {
-        setError("That's your own badge.")
-        return
-      }
-      if (job.team?.some(m => m.employee_id === member.employee_id)) {
+      if (!member) { setError(`Badge not recognised: ${badgeCode}`); return }
+      if (member.employee_id === managerId) { setError("That's your own badge."); return }
+      if (activeTeam.some(m => m.employee_id === member.employee_id)) {
         setError(`${member.full_name} is already on this job.`)
         return
       }
-      await addTeamMemberToJob(member.employee_id, job.job_id, lineId)
-      onAdd(job.job_id, { employee_id: member.employee_id, full_name: member.full_name, badge_code: member.badge_code })
+      const startEv = await addTeamMemberToJob(member.employee_id, job.job_id, lineId)
+      onAdd(job.job_id, {
+        employee_id: member.employee_id,
+        full_name:   member.full_name,
+        badge_code:  member.badge_code,
+        events:      [startEv]
+      })
     } catch (err) {
       console.error(err)
       setError('Could not look up badge — check connection.')
@@ -101,8 +101,8 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onRemove, onClose }) {
 
   async function handleRemove(member) {
     try {
-      await removeTeamMemberFromJob(member.employee_id, job.job_id, lineId)
-      onRemove(job.job_id, member.employee_id)
+      const pauseEv = await removeTeamMemberFromJob(member.employee_id, job.job_id, lineId)
+      onRemove(job.job_id, member.employee_id, pauseEv)
     } catch (err) {
       console.error(err)
       setError('Remove failed — check connection.')
@@ -120,12 +120,11 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onRemove, onClose }) {
           <button className="btn-ghost px-4 py-2" onClick={onClose}>Done</button>
         </div>
 
-        {/* Current team */}
-        {(!job.team || job.team.length === 0) ? (
+        {activeTeam.length === 0 ? (
           <p className="text-stone-600 text-sm mb-4">No team members on this job yet.</p>
         ) : (
           <div className="flex flex-wrap gap-2 mb-4">
-            {job.team.map(m => (
+            {activeTeam.map(m => (
               <span
                 key={m.employee_id}
                 className="flex items-center gap-2 bg-stone-700 rounded-full px-3 py-1.5 text-sm text-stone-200"
@@ -142,7 +141,6 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onRemove, onClose }) {
           </div>
         )}
 
-        {/* Scan input */}
         <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Scan badge to add member</p>
         <div className="relative">
           <input
@@ -174,27 +172,40 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onRemove, onClose }) {
 }
 
 // ── Assembly job card ─────────────────────────────────────────────────────────
+// Timer shows TOTAL TEAM TIME: manager's credited share + every team member's time.
+// Manager's share is already split by the number of active lines (split_count in events).
+// Team members always have split_count=1 (they're only ever on one job at a time).
+// Rate example: manager on 2 lines + 2 team members → 0.5 + 1 + 1 = 2.5 s/s per job.
+
 function AssemblyJobCard({ job, breakRules, onHold, onResume, onComplete, onEditTeam }) {
   const active     = isJobActive(job.events)
   const lastPause  = [...job.events].reverse().find(e => e.event_type === 'PAUSE')
   const holdReason = active ? null : lastPause?.hold_reason
+  const activeTeam = (job.team ?? []).filter(m => isJobActive(m.events))
 
-  function computeElapsed() { return calcElapsed(job.events, breakRules) }
-  const [elapsed, setElapsed] = useState(computeElapsed)
+  // Any member (or manager) still active means the timer should tick
+  const anyActive = active || (job.team ?? []).some(m => isJobActive(m.events))
+
+  function computeTotal() {
+    const managerMs = calcElapsed(job.events, breakRules)
+    const teamMs    = (job.team ?? []).reduce((sum, m) => sum + calcElapsed(m.events, breakRules), 0)
+    return managerMs + teamMs
+  }
+
+  const [elapsed, setElapsed] = useState(computeTotal)
 
   useEffect(() => {
-    setElapsed(computeElapsed())
-    if (!active) return
-    const id = setInterval(() => setElapsed(computeElapsed()), 1000)
+    setElapsed(computeTotal())
+    if (!anyActive) return
+    const id = setInterval(() => setElapsed(computeTotal()), 1000)
     return () => clearInterval(id)
-  }, [active, job.events, breakRules])
+  }, [anyActive, job.events, job.team, breakRules])
 
   return (
     <div className={`rounded-2xl border-2 transition-colors overflow-hidden ${
       active ? 'bg-stone-800 border-amber-500' : 'border-stone-700'
     }`} style={active ? {} : { backgroundColor: '#1e1b18' }}>
 
-      {/* Job info + timer */}
       <div className="p-5 pb-3">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -214,6 +225,9 @@ function AssemblyJobCard({ job, breakRules, onHold, onResume, onComplete, onEdit
             <p className={`text-2xl font-mono font-bold ${active ? 'text-amber-400' : 'text-stone-400'}`}>
               {formatDuration(elapsed)}
             </p>
+            {active && activeTeam.length > 0 && (
+              <p className="text-xs text-sky-400 mt-0.5">{activeTeam.length + 1} people</p>
+            )}
             {holdReason && (
               <p className="text-xs text-orange-400 mt-1 max-w-[140px] text-right leading-tight">
                 {HOLD_REASON_LABEL[holdReason] ?? holdReason}
@@ -231,10 +245,10 @@ function AssemblyJobCard({ job, breakRules, onHold, onResume, onComplete, onEdit
           >
             ✏ Team
           </button>
-          {(!job.team || job.team.length === 0) ? (
+          {activeTeam.length === 0 ? (
             <span className="text-xs text-stone-600">No members assigned</span>
           ) : (
-            job.team.map(m => (
+            activeTeam.map(m => (
               <span key={m.employee_id} className="text-xs bg-stone-700 text-stone-300 rounded-full px-2.5 py-1">
                 {m.full_name}
               </span>
@@ -243,7 +257,6 @@ function AssemblyJobCard({ job, breakRules, onHold, onResume, onComplete, onEdit
         </div>
       </div>
 
-      {/* Action buttons */}
       <div className="flex gap-3 px-5 pb-5">
         {active ? (
           <button className="btn-secondary flex-1" onClick={() => onHold(job.job_id)}>
@@ -341,26 +354,41 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
   }, [modal])
 
   // ── Local state helpers ────────────────────────────────────────────────────
+
   function appendJobEvent(jobId, ev) {
     setJobs(prev => prev.map(j =>
       j.job_id === jobId ? { ...j, events: [...j.events, ev] } : j
     ))
   }
 
-  function jobMemberIds(job) {
-    return [employee.employee_id, ...(job.team ?? []).map(m => m.employee_id)]
-  }
+  // Fire an event for manager + all currently-active team members on a job.
+  // Also updates team member events in local state so timers respond immediately.
+  async function fireTeamEvent(jobId, eventType, holdReason = null, managerSplitCount = 1) {
+    const job        = jobs.find(j => j.job_id === jobId)
+    const activeTeam = (job.team ?? []).filter(m => isJobActive(m.events))
+    const teamIds    = activeTeam.map(m => m.employee_id)
 
-  async function fireTeamEvent(jobId, eventType, holdReason = null) {
-    const job = jobs.find(j => j.job_id === jobId)
-    const ev = await logAssemblyTeamEvent(
-      jobMemberIds(job),
-      jobId,
-      eventType,
-      selectedLine.line_id,
-      holdReason
+    const managerEv = await logAssemblyTeamEvent(
+      employee.employee_id, teamIds, jobId, eventType,
+      selectedLine.line_id, holdReason, managerSplitCount
     )
-    appendJobEvent(jobId, ev)
+
+    // Update manager's timeline events
+    appendJobEvent(jobId, managerEv)
+
+    // Update each team member's events so their individual timers update
+    if (teamIds.length > 0) {
+      setJobs(prev => prev.map(j =>
+        j.job_id !== jobId ? j : {
+          ...j,
+          team: (j.team ?? []).map(m =>
+            teamIds.includes(m.employee_id)
+              ? { ...m, events: [...(m.events ?? []), { event_type: eventType, event_timestamp: managerEv.event_timestamp }] }
+              : m
+          )
+        }
+      ))
+    }
   }
 
   // ── Job scan ───────────────────────────────────────────────────────────────
@@ -376,24 +404,25 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
     setScanning(true)
     setError('')
     try {
-      const { job, created } = await findOrCreateJob(poNumber, partNumber)
+      const { job } = await findOrCreateJob(poNumber, partNumber)
       const existing = jobs.find(j => j.job_id === job.job_id)
 
       if (existing) {
         if (isJobActive(existing.events)) {
           setError(`PO ${poNumber} / ${partNumber} is already active on this line.`)
         } else {
-          await fireTeamEvent(job.job_id, 'RESUME')
+          // Resuming an existing job — use current line split count
+          const splitCount = await getManagerLineSplitCount(employee.employee_id)
+          await fireTeamEvent(job.job_id, 'RESUME', null, splitCount)
         }
       } else {
-        // Start for manager only — team modal opens immediately after
-        const ev = await logAssemblyTeamEvent(
-          [employee.employee_id],
-          job.job_id,
-          'START',
-          selectedLine.line_id
+        // New job on this line — update split for all other lines first
+        const splitCount = await prepareManagerLineStart(employee.employee_id, selectedLine.line_id)
+        const managerEv  = await logAssemblyTeamEvent(
+          employee.employee_id, [], job.job_id, 'START',
+          selectedLine.line_id, null, splitCount
         )
-        setJobs(prev => [...prev, { ...job, events: [ev], team: [] }])
+        setJobs(prev => [...prev, { ...job, events: [managerEv], team: [] }])
         setModal({ type: 'team', jobId: job.job_id })
       }
     } catch (err) {
@@ -413,7 +442,8 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
     const { jobId } = modal
     setModal(null)
     try {
-      await fireTeamEvent(jobId, 'PAUSE', reason)
+      // PAUSE event — split_count doesn't matter for PAUSE
+      await fireTeamEvent(jobId, 'PAUSE', reason, 1)
     } catch (err) {
       console.error(err)
       setError('Hold failed.')
@@ -422,7 +452,9 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
 
   async function handleResume(jobId) {
     try {
-      await fireTeamEvent(jobId, 'RESUME')
+      // Query current split count from DB (may have changed since this job was held)
+      const splitCount = await getManagerLineSplitCount(employee.employee_id)
+      await fireTeamEvent(jobId, 'RESUME', null, splitCount)
     } catch (err) {
       console.error(err)
       setError('Resume failed.')
@@ -438,8 +470,13 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
     const { jobId } = modal
     setModal(null)
     try {
-      await fireTeamEvent(jobId, 'COMPLETE')
+      await fireTeamEvent(jobId, 'COMPLETE', null, 1)
       setJobs(prev => prev.filter(j => j.job_id !== jobId))
+      // Update remaining active lines' split_count after this job ends
+      await onManagerLineEnd(employee.employee_id)
+      // Reload this line's jobs from DB to reflect any split_count updates
+      const fresh = await loadLineJobs(selectedLine.line_id, employee.employee_id)
+      setJobs(fresh)
     } catch (err) {
       console.error(err)
       setError('Complete failed.')
@@ -451,17 +488,24 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
     setModal({ type: 'team', jobId })
   }
 
+  // member includes {employee_id, full_name, badge_code, events: [startEv]}
   function handleTeamAdd(jobId, member) {
     setJobs(prev => prev.map(j =>
       j.job_id === jobId ? { ...j, team: [...(j.team ?? []), member] } : j
     ))
   }
 
-  function handleTeamRemove(jobId, employeeId) {
+  // Adds the pauseEv to the member's events so their timer stops immediately
+  function handleTeamRemove(jobId, employeeId, pauseEv) {
     setJobs(prev => prev.map(j =>
-      j.job_id === jobId
-        ? { ...j, team: (j.team ?? []).filter(m => m.employee_id !== employeeId) }
-        : j
+      j.job_id !== jobId ? j : {
+        ...j,
+        team: (j.team ?? []).map(m =>
+          m.employee_id === employeeId
+            ? { ...m, events: [...(m.events ?? []), pauseEv] }
+            : m
+        )
+      }
     ))
   }
 

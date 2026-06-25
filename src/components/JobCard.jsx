@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { calcElapsed, formatDuration, isJobActive } from '../lib/timeCalc'
 
 const ACTIVITY_LABEL = { tack: 'Tack', weld: 'Weld', tack_weld: 'Tack & Weld' }
@@ -10,19 +10,8 @@ export default function JobCard({
 }) {
   const active = isJobActive(job.events)
 
-  // Refs so the interval always reads current values without re-registering
-  const allJobsRef   = useRef(allJobs)
-  const splitModeRef = useRef(splitMode)
-  useEffect(() => { allJobsRef.current   = allJobs   }, [allJobs])
-  useEffect(() => { splitModeRef.current = splitMode }, [splitMode])
-
-  function computeElapsed() {
-    const activeCount = splitModeRef.current
-      ? (allJobsRef.current ?? []).filter(j => isJobActive(j.events)).length
-      : 1
-    return calcElapsed(job.events, breakRules, activeCount)
-  }
-
+  // split_count is now stored in each event — timer reads it from events directly
+  function computeElapsed() { return calcElapsed(job.events, breakRules) }
   const [elapsed, setElapsed] = useState(computeElapsed)
 
   useEffect(() => {
@@ -30,9 +19,9 @@ export default function JobCard({
     if (!active) return
     const id = setInterval(() => setElapsed(computeElapsed()), 1000)
     return () => clearInterval(id)
-  }, [active, job.events, breakRules, splitMode])
+  }, [active, job.events, breakRules])
 
-  // Number of currently active jobs (for the ÷N badge)
+  // Number of currently active jobs — for the ÷N badge only, not the timer
   const splitCount = splitMode
     ? (allJobs ?? []).filter(j => isJobActive(j.events)).length
     : 1

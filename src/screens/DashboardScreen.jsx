@@ -6,24 +6,18 @@ import {
   resumeJob,
   completeJob
 } from '../lib/db'
-import { isJobActive, getOpenStart, parseJobBarcode } from '../lib/timeCalc'
+import { isJobActive, parseJobBarcode } from '../lib/timeCalc'
 import JobCard from '../components/JobCard'
 
-const INACTIVITY_TIMEOUT_MS = 75_000 // 75 seconds
+const INACTIVITY_TIMEOUT_MS = 75_000
 
 // ── Two-step action modal (Activity → Work type) ─────────────────────────────
 function JobActionModal({ onConfirm, onCancel }) {
   const [step, setStep]             = useState(1)
   const [activityType, setActivity] = useState(null)
 
-  function pickActivity(type) {
-    setActivity(type)
-    setStep(2)
-  }
-
-  function pickWorkType(workType) {
-    onConfirm({ activityType, workType })
-  }
+  function pickActivity(type) { setActivity(type); setStep(2) }
+  function pickWorkType(workType) { onConfirm({ activityType, workType }) }
 
   const activityLabel = { tack: 'Tack', weld: 'Weld', tack_weld: 'Tack & Weld' }
 
@@ -32,42 +26,26 @@ function JobActionModal({ onConfirm, onCancel }) {
       <div className="bg-stone-800 border border-stone-600 rounded-2xl p-8 w-full max-w-sm">
         {step === 1 ? (
           <>
-            <h2 className="text-2xl font-bold text-stone-100 mb-1 text-center">
-              What are you doing?
-            </h2>
+            <h2 className="text-2xl font-bold text-stone-100 mb-1 text-center">What are you doing?</h2>
             <p className="text-stone-400 text-center text-sm mb-6">Step 1 of 2</p>
             <div className="flex flex-col gap-4">
-              <button className="btn-primary  text-xl py-5" onClick={() => pickActivity('tack')}>
-                Tack
-              </button>
-              <button className="btn-secondary text-xl py-5" onClick={() => pickActivity('weld')}>
-                Weld
-              </button>
-              <button className="btn-ghost    text-xl py-5" onClick={() => pickActivity('tack_weld')}>
-                Tack &amp; Weld
-              </button>
+              <button className="btn-primary  text-xl py-5" onClick={() => pickActivity('tack')}>Tack</button>
+              <button className="btn-secondary text-xl py-5" onClick={() => pickActivity('weld')}>Weld</button>
+              <button className="btn-ghost    text-xl py-5" onClick={() => pickActivity('tack_weld')}>Tack &amp; Weld</button>
               <button className="btn-ghost mt-1" onClick={onCancel}>Cancel</button>
             </div>
           </>
         ) : (
           <>
-            <h2 className="text-2xl font-bold text-stone-100 mb-1 text-center">
-              Working on?
-            </h2>
+            <h2 className="text-2xl font-bold text-stone-100 mb-1 text-center">Working on?</h2>
             <p className="text-stone-400 text-center text-sm mb-6">
               Step 2 of 2 &nbsp;·&nbsp;
               <span className="text-amber-400">{activityLabel[activityType]}</span>
             </p>
             <div className="flex flex-col gap-4">
-              <button className="btn-primary  text-xl py-5" onClick={() => pickWorkType('parts')}>
-                Parts
-              </button>
-              <button className="btn-secondary text-xl py-5" onClick={() => pickWorkType('frames')}>
-                Frames
-              </button>
-              <button className="btn-ghost    text-xl py-5" onClick={() => pickWorkType('parts_frames')}>
-                Parts &amp; Frames
-              </button>
+              <button className="btn-primary  text-xl py-5" onClick={() => pickWorkType('parts')}>Parts</button>
+              <button className="btn-secondary text-xl py-5" onClick={() => pickWorkType('frames')}>Frames</button>
+              <button className="btn-ghost    text-xl py-5" onClick={() => pickWorkType('parts_frames')}>Parts &amp; Frames</button>
               <button className="btn-ghost mt-1" onClick={() => setStep(1)}>← Back</button>
             </div>
           </>
@@ -102,31 +80,62 @@ function ConfirmModal({ job, onConfirm, onCancel }) {
 export default function DashboardScreen({ employee, initialJobs, initialSplitMode, breakRules, onLogout }) {
   const [jobs, setJobs]           = useState(initialJobs)
   const [splitMode, setSplitMode] = useState(initialSplitMode)
-  const [error, setError]       = useState('')
-  const [scanning, setScanning] = useState(false)
-  const [modal, setModal]       = useState(null)
+  const [error, setError]         = useState('')
+  const [scanning, setScanning]   = useState(false)
+  const [modal, setModal]         = useState(null)
 
   const scanInputRef  = useRef(null)
   const bufferRef     = useRef('')
   const inactivityRef = useRef(null)
 
-  const activeJobId  = jobs.find(j => isJobActive(j.events))?.job_id ?? null
   const activeJobIds = jobs.filter(j => isJobActive(j.events)).map(j => j.job_id)
+  const activeCount  = activeJobIds.length
 
-  // Ref so inactivity callback always sees the current set of active jobs
   const activeJobIdsRef = useRef(activeJobIds)
   useEffect(() => { activeJobIdsRef.current = activeJobIds }, [jobs])
 
-  const activeCount = jobs.filter(j => isJobActive(j.events)).length
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+
+  // Get the activity_type and work_type from a job's most recent START/RESUME
+  function getLastTag(events) {
+    return [...events]
+      .filter(e => e.event_type === 'START' || e.event_type === 'RESUME')
+      .sort((a, b) => new Date(b.event_timestamp) - new Date(a.event_timestamp))[0] ?? {}
+  }
+
+  function appendEvent(jobId, ev) {
+    setJobs(prev =>
+      prev.map(j => j.job_id === jobId ? { ...j, events: [...j.events, ev] } : j)
+    )
+  }
+
+  async function pauseActive() {
+    const id = jobs.find(j => isJobActive(j.events))?.job_id
+    if (!id) return
+    const ev = await pauseJob(employee.employee_id, id)
+    appendEvent(id, ev)
+  }
+
+  // When split count changes, close current intervals and reopen with newCount.
+  // excludeJobId is the job being stopped (already paused before this call).
+  async function updateSplitCounts(newCount, excludeJobId = null) {
+    const targets = jobs.filter(j => isJobActive(j.events) && j.job_id !== excludeJobId)
+    for (const j of targets) {
+      const tag    = getLastTag(j.events)
+      const pauseEv  = await pauseJob(employee.employee_id, j.job_id)
+      appendEvent(j.job_id, pauseEv)
+      const resumeEv = await resumeJob(
+        employee.employee_id, j.job_id, tag.activity_type, tag.work_type, newCount
+      )
+      appendEvent(j.job_id, resumeEv)
+    }
+  }
 
   // ── Inactivity timer ────────────────────────────────────────────────────────
   const resetInactivity = useCallback(() => {
     if (inactivityRef.current) clearTimeout(inactivityRef.current)
-    inactivityRef.current = setTimeout(() => {
-      // Just reset the screen — jobs keep running until welder manually pauses
-      onLogout()
-    }, INACTIVITY_TIMEOUT_MS)
-  }, [employee.employee_id, onLogout])
+    inactivityRef.current = setTimeout(onLogout, INACTIVITY_TIMEOUT_MS)
+  }, [onLogout])
 
   useEffect(() => {
     resetInactivity()
@@ -141,22 +150,6 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
   useEffect(() => {
     if (!modal && scanInputRef.current) scanInputRef.current.focus()
   }, [modal])
-
-  // ── Local state helpers ─────────────────────────────────────────────────────
-  function appendEvent(jobId, eventData) {
-    setJobs(prev =>
-      prev.map(j =>
-        j.job_id === jobId ? { ...j, events: [...j.events, eventData] } : j
-      )
-    )
-  }
-
-  // Pauses whichever job is currently active (used in normal mode only)
-  async function pauseActive() {
-    if (!activeJobId) return
-    const ev = await pauseJob(employee.employee_id, activeJobId)
-    appendEvent(activeJobId, ev)
-  }
 
   // ── Barcode scan ────────────────────────────────────────────────────────────
   async function handleJobScan(rawValue) {
@@ -191,25 +184,38 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
     setModal(null)
     try {
       if (action === 'edit') {
-        // Pause and re-resume with corrected types (always single-job operation)
+        // Pause + re-resume with corrected types; preserve current split count
+        const currentSplit = splitMode ? activeCount : 1
         const pauseEv  = await pauseJob(employee.employee_id, jobId)
         appendEvent(jobId, pauseEv)
-        const resumeEv = await resumeJob(employee.employee_id, jobId, activityType, workType)
+        const resumeEv = await resumeJob(employee.employee_id, jobId, activityType, workType, currentSplit)
         appendEvent(jobId, resumeEv)
 
       } else if (action === 'start') {
-        // In normal mode, pause whatever is currently active first
-        if (!splitMode) await pauseActive()
-        const events = await startNewJob(
-          employee.employee_id, jobId, wasCreated, activityType, workType
-        )
-        setJobs(prev => [...prev, { ...newJob, events }])
+        if (splitMode) {
+          // Lock in current split time, then open new intervals at the higher count
+          const newCount = activeCount + 1
+          await updateSplitCounts(newCount)
+          const events = await startNewJob(employee.employee_id, jobId, wasCreated, activityType, workType, newCount)
+          setJobs(prev => [...prev, { ...newJob, events }])
+        } else {
+          await pauseActive()
+          const events = await startNewJob(employee.employee_id, jobId, wasCreated, activityType, workType, 1)
+          setJobs(prev => [...prev, { ...newJob, events }])
+        }
 
       } else {
-        // resume — in normal mode pause current first; in split mode just resume alongside
-        if (!splitMode) await pauseActive()
-        const ev = await resumeJob(employee.employee_id, jobId, activityType, workType)
-        appendEvent(jobId, ev)
+        // resume
+        if (splitMode) {
+          const newCount = activeCount + 1
+          await updateSplitCounts(newCount)
+          const ev = await resumeJob(employee.employee_id, jobId, activityType, workType, newCount)
+          appendEvent(jobId, ev)
+        } else {
+          await pauseActive()
+          const ev = await resumeJob(employee.employee_id, jobId, activityType, workType, 1)
+          appendEvent(jobId, ev)
+        }
       }
     } catch (err) {
       console.error(err)
@@ -222,6 +228,18 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
     try {
       const ev = await pauseJob(employee.employee_id, jobId)
       appendEvent(jobId, ev)
+
+      if (splitMode) {
+        // Remaining active jobs after this pause
+        const remaining = jobs.filter(j => isJobActive(j.events) && j.job_id !== jobId)
+        if (remaining.length > 0) {
+          await updateSplitCounts(remaining.length, jobId)
+        }
+        // Auto-turn off split if 1 or fewer jobs remain
+        if (remaining.length <= 1) {
+          setSplitMode(false)
+        }
+      }
     } catch (err) {
       console.error(err)
       setError('Pause failed.')
@@ -247,6 +265,16 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
     try {
       await completeJob(employee.employee_id, jobId)
       setJobs(prev => prev.filter(j => j.job_id !== jobId))
+
+      if (splitMode) {
+        const remaining = jobs.filter(j => isJobActive(j.events) && j.job_id !== jobId)
+        if (remaining.length > 0) {
+          await updateSplitCounts(remaining.length, jobId)
+        }
+        if (remaining.length <= 1) {
+          setSplitMode(false)
+        }
+      }
     } catch (err) {
       console.error(err)
       setError('Complete failed.')
@@ -259,39 +287,36 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
     setSplitMode(v => !v)
 
     if (turningOff) {
-      // Turning split OFF — pause all active jobs except the most recently started
       const activeJobs = jobs.filter(j => isJobActive(j.events))
-      if (activeJobs.length > 1) {
-        // Sort by when each job's current interval started (most recent first)
-        const sorted = activeJobs
-          .map(j => {
-            const last = [...j.events]
-              .filter(e => e.event_type === 'START' || e.event_type === 'RESUME')
-              .sort((a, b) => new Date(b.event_timestamp) - new Date(a.event_timestamp))[0]
-            return { jobId: j.job_id, t: new Date(last.event_timestamp) }
-          })
-          .sort((a, b) => b.t - a.t)
+      if (activeJobs.length < 2) return
 
-        // Pause everything except the most recently started
-        for (const { jobId } of sorted.slice(1)) {
-          try {
-            const ev = await pauseJob(employee.employee_id, jobId)
-            appendEvent(jobId, ev)
-          } catch (err) {
-            console.error(err)
-          }
-        }
+      // Find the most recently started job — it keeps running
+      const sorted = [...activeJobs].sort((a, b) => {
+        const aT = getLastTag(a.events).event_timestamp ?? ''
+        const bT = getLastTag(b.events).event_timestamp ?? ''
+        return bT < aT ? -1 : 1
+      })
+      const keeper = sorted[0]
+
+      // Pause ALL active jobs (locks in the split-divided time)
+      for (const job of sorted) {
+        try {
+          const ev = await pauseJob(employee.employee_id, job.job_id)
+          appendEvent(job.job_id, ev)
+        } catch (err) { console.error(err) }
       }
+
+      // Resume only the keeper at full rate (split_count=1)
+      try {
+        const tag = getLastTag(keeper.events)
+        const ev  = await resumeJob(employee.employee_id, keeper.job_id, tag.activity_type, tag.work_type, 1)
+        appendEvent(keeper.job_id, ev)
+      } catch (err) { console.error(err) }
     }
   }
 
-  // ── Explicit logout ─────────────────────────────────────────────────────────
-  function handleLogout() {
-    // Just reset the screen — jobs keep running until welder manually pauses
-    onLogout()
-  }
+  function handleLogout() { onLogout() }
 
-  // ── Scanner input ───────────────────────────────────────────────────────────
   function handleKeyDown(e) {
     if (e.key === 'Enter') {
       const val = bufferRef.current.trim()
@@ -301,9 +326,7 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
     }
   }
 
-  function handleInput(e) {
-    bufferRef.current = e.target.value
-  }
+  function handleInput(e) { bufferRef.current = e.target.value }
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -316,7 +339,6 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {/* Split mode toggle */}
           <button
             onClick={handleSplitToggle}
             className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-semibold transition-colors ${
@@ -371,9 +393,7 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
             style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
           />
           {scanning && (
-            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-amber-400 animate-pulse">
-              …
-            </span>
+            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-amber-400 animate-pulse">…</span>
           )}
         </div>
         {error && <p className="text-red-400 text-sm mt-2">{error}</p>}

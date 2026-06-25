@@ -45,7 +45,7 @@ export async function loadEmployeeJobs(employeeId) {
   const { data: rows, error } = await supabase
     .from('job_events')
     .select(`
-      event_id, job_id, event_type, activity_type, event_timestamp,
+      event_id, job_id, event_type, activity_type, work_type, split_count, event_timestamp,
       jobs ( job_id, po_number, part_number, quantity, status )
     `)
     .eq('employee_id', employeeId)
@@ -55,26 +55,23 @@ export async function loadEmployeeJobs(employeeId) {
   if (error) throw error
   if (!rows || rows.length === 0) return []
 
-  // Group events by job_id
   const map = new Map()
   for (const row of rows) {
     if (!row.job_id || !row.jobs) continue
     if (!map.has(row.job_id)) {
-      map.set(row.job_id, {
-        ...row.jobs,
-        events: []
-      })
+      map.set(row.job_id, { ...row.jobs, events: [] })
     }
     map.get(row.job_id).events.push({
       event_id:        row.event_id,
       job_id:          row.job_id,
       event_type:      row.event_type,
       activity_type:   row.activity_type,
+      work_type:       row.work_type,
+      split_count:     row.split_count ?? 1,
       event_timestamp: row.event_timestamp
     })
   }
 
-  // Drop completed jobs
   const result = []
   for (const job of map.values()) {
     const last = job.events[job.events.length - 1]
@@ -86,7 +83,6 @@ export async function loadEmployeeJobs(employeeId) {
 // ── Find or create a job by PO + part ────────────────────────────────────────
 
 export async function findOrCreateJob(poNumber, partNumber) {
-  // Try existing
   const { data: existing } = await supabase
     .from('jobs')
     .select('*')
@@ -95,7 +91,6 @@ export async function findOrCreateJob(poNumber, partNumber) {
     .maybeSingle()
   if (existing) return { job: existing, created: false }
 
-  // Create
   const { data, error } = await supabase
     .from('jobs')
     .insert({ po_number: poNumber, part_number: partNumber, status: 'not_started' })
@@ -114,11 +109,11 @@ export async function setJobStatus(jobId, status) {
 // ── High-level job actions ────────────────────────────────────────────────────
 
 /**
- * Start a brand-new job for this employee (job was just created or is
- * being started for the first time by this employee).
- * Returns the two inserted events [JOB_CREATED?, START].
+ * Start a brand-new job for this employee.
+ * splitCount records how many ways the employee's time is being divided
+ * at the moment this START event is logged (default 1 = undivided).
  */
-export async function startNewJob(employeeId, jobId, wasCreated, activityType, workType) {
+export async function startNewJob(employeeId, jobId, wasCreated, activityType, workType, splitCount = 1) {
   const events = []
   if (wasCreated) {
     events.push(
@@ -131,7 +126,8 @@ export async function startNewJob(employeeId, jobId, wasCreated, activityType, w
       job_id:        jobId,
       event_type:    'START',
       activity_type: activityType,
-      work_type:     workType
+      work_type:     workType,
+      split_count:   splitCount
     })
   )
   await setJobStatus(jobId, 'in_progress')
@@ -153,14 +149,16 @@ export async function pauseJob(employeeId, jobId) {
 
 /**
  * Resume a paused job for this employee.
+ * splitCount records the current split level for this new interval.
  */
-export async function resumeJob(employeeId, jobId, activityType, workType) {
+export async function resumeJob(employeeId, jobId, activityType, workType, splitCount = 1) {
   const ev = await insertEvent({
     employee_id:   employeeId,
     job_id:        jobId,
     event_type:    'RESUME',
     activity_type: activityType,
-    work_type:     workType
+    work_type:     workType,
+    split_count:   splitCount
   })
   await setJobStatus(jobId, 'in_progress')
   return ev
@@ -181,7 +179,6 @@ export async function completeJob(employeeId, jobId) {
 
 /**
  * Auto-logout: pause ALL currently active jobs (handles split mode).
- * activeJobIds can be a single id string or an array.
  */
 export async function autoLogout(employeeId, activeJobIds) {
   const ids = Array.isArray(activeJobIds)
@@ -213,14 +210,17 @@ export async function fetchAssemblyLines() {
 }
 
 // ── Load all active (non-completed) jobs for a given assembly line ────────────
-// managerId is used to isolate timeline events (manager controls HOLD/RESUME/FINISH).
-// Team membership is derived from all other employees' last event on each job.
+//
+// job.events   = manager-only events (drive the job lifecycle timer + status)
+// job.team     = ALL team members who were ever on this job, each with their own
+//                events array.  isJobActive(m.events) → currently active.
+//                Timer sums all members' credited time (including departed ones).
 
 export async function loadLineJobs(lineId, managerId) {
   const { data: rows, error } = await supabase
     .from('job_events')
     .select(`
-      event_id, job_id, employee_id, event_type, hold_reason, event_timestamp,
+      event_id, job_id, employee_id, event_type, hold_reason, split_count, event_timestamp,
       jobs ( job_id, po_number, part_number, quantity, status ),
       employees ( employee_id, full_name, badge_code )
     `)
@@ -231,51 +231,52 @@ export async function loadLineJobs(lineId, managerId) {
   if (error) throw error
   if (!rows?.length) return []
 
-  const jobMap    = new Map() // job_id → job object with events + team
-  const empState  = new Map() // job_id → Map<emp_id, {emp, lastEvent}>
+  // job_id → { ...job fields, events: [], empData: Map<empId, {info, events[]}> }
+  const jobMap = new Map()
 
   for (const row of rows) {
     if (!row.job_id || !row.jobs) continue
 
     if (!jobMap.has(row.job_id)) {
-      jobMap.set(row.job_id, { ...row.jobs, events: [] })
-      empState.set(row.job_id, new Map())
+      jobMap.set(row.job_id, { ...row.jobs, events: [], empData: new Map() })
     }
 
-    // Only manager events drive the job timeline (timer + active/held status)
+    const job = jobMap.get(row.job_id)
+    const ev = {
+      event_id:        row.event_id,
+      event_type:      row.event_type,
+      hold_reason:     row.hold_reason,
+      split_count:     row.split_count ?? 1,
+      event_timestamp: row.event_timestamp
+    }
+
     if (row.employee_id === managerId) {
-      jobMap.get(row.job_id).events.push({
-        event_id:        row.event_id,
-        event_type:      row.event_type,
-        hold_reason:     row.hold_reason,
-        event_timestamp: row.event_timestamp
-      })
-    }
-
-    // Track per-employee last event for team membership
-    if (row.employee_id && row.employees) {
-      empState.get(row.job_id).set(row.employee_id, {
-        employee_id: row.employees.employee_id,
-        full_name:   row.employees.full_name,
-        badge_code:  row.employees.badge_code,
-        lastEvent:   row.event_type
-      })
+      // Manager events drive the lifecycle and timer
+      job.events.push(ev)
+    } else if (row.employees) {
+      // Track all team member events for their individual time credit
+      if (!job.empData.has(row.employee_id)) {
+        job.empData.set(row.employee_id, {
+          employee_id: row.employees.employee_id,
+          full_name:   row.employees.full_name,
+          badge_code:  row.employees.badge_code,
+          events:      []
+        })
+      }
+      job.empData.get(row.employee_id).events.push(ev)
     }
   }
 
   const result = []
-  for (const [jobId, job] of jobMap) {
+  for (const [, job] of jobMap) {
     const last = job.events[job.events.length - 1]
     if (last?.event_type === 'COMPLETE') continue
 
-    // Team = non-manager employees with last event START or RESUME
-    const emps = empState.get(jobId) ?? new Map()
-    job.team = [...emps.values()]
-      .filter(e => e.employee_id !== managerId)
-      .filter(e => e.lastEvent === 'START' || e.lastEvent === 'RESUME')
-      .map(({ employee_id, full_name, badge_code }) => ({ employee_id, full_name, badge_code }))
+    const { empData, ...jobFields } = job
+    // team = all members (active + departed) — UI filters to active, timer sums all
+    jobFields.team = [...empData.values()]
 
-    result.push(job)
+    result.push(jobFields)
   }
   return result
 }
@@ -283,23 +284,11 @@ export async function loadLineJobs(lineId, managerId) {
 // ── Add / remove a team member from a specific assembly job ───────────────────
 
 export async function addTeamMemberToJob(employeeId, jobId, lineId) {
-  const ev = await insertEvent({
-    employee_id: employeeId,
-    job_id:      jobId,
-    event_type:  'START',
-    line_id:     lineId
-  })
-  return ev
+  return insertEvent({ employee_id: employeeId, job_id: jobId, event_type: 'START', line_id: lineId })
 }
 
 export async function removeTeamMemberFromJob(employeeId, jobId, lineId) {
-  const ev = await insertEvent({
-    employee_id: employeeId,
-    job_id:      jobId,
-    event_type:  'PAUSE',
-    line_id:     lineId
-  })
-  return ev
+  return insertEvent({ employee_id: employeeId, job_id: jobId, event_type: 'PAUSE', line_id: lineId })
 }
 
 // ── Find an employee by badge code (for team scanning in Assembly) ─────────────
@@ -315,13 +304,33 @@ export async function findTeamMember(badgeCode) {
   return data
 }
 
-// ── Log a team event for Assembly (fires for manager + all team members) ───────
-// All events get the same timestamp so deduplication works in loadLineJobs.
+// ── Log a team event for Assembly ─────────────────────────────────────────────
+//
+// Manager event gets managerSplitCount (how many lines the manager is covering).
+// Team member events always get split_count=1 (each person is on one job).
+// All events share the same timestamp for deduplication in DB reads.
+//
+// Returns the manager event data (for local state update of job.events).
 
-export async function logAssemblyTeamEvent(employeeIds, jobId, eventType, lineId, holdReason = null) {
+export async function logAssemblyTeamEvent(
+  managerId, teamMemberIds, jobId, eventType, lineId, holdReason = null, managerSplitCount = 1
+) {
   const now = new Date().toISOString()
-  for (const empId of employeeIds) {
-    await insertEvent({
+
+  // Manager event
+  await supabase.from('job_events').insert({
+    employee_id:     managerId,
+    job_id:          jobId,
+    event_type:      eventType,
+    line_id:         lineId,
+    hold_reason:     holdReason || null,
+    split_count:     managerSplitCount,
+    event_timestamp: now
+  })
+
+  // Team member events (split_count stays at DB default 1)
+  for (const empId of teamMemberIds) {
+    await supabase.from('job_events').insert({
       employee_id:     empId,
       job_id:          jobId,
       event_type:      eventType,
@@ -330,14 +339,16 @@ export async function logAssemblyTeamEvent(employeeIds, jobId, eventType, lineId
       event_timestamp: now
     })
   }
-  const statusMap = {
-    START:    'in_progress',
-    RESUME:   'in_progress',
-    PAUSE:    'paused',
-    COMPLETE: 'completed'
-  }
+
+  const statusMap = { START: 'in_progress', RESUME: 'in_progress', PAUSE: 'paused', COMPLETE: 'completed' }
   await setJobStatus(jobId, statusMap[eventType] ?? 'in_progress')
-  return { event_type: eventType, hold_reason: holdReason, event_timestamp: now }
+
+  return {
+    event_type:      eventType,
+    hold_reason:     holdReason,
+    split_count:     managerSplitCount,
+    event_timestamp: now
+  }
 }
 
 // ── Pause a job with a hold reason (Paint / Assembly HOLD) ───────────────────
@@ -353,15 +364,131 @@ export async function holdJob(employeeId, jobId, holdReason) {
   return ev
 }
 
+// ── Assembly manager line-split helpers ──────────────────────────────────────
+//
+// When a line manager works across multiple lines their time is split evenly.
+// These functions update existing active jobs with the new split_count whenever
+// the manager starts or finishes on a line, ensuring the division is baked into
+// the event log permanently (not just a display-time calculation).
+
+// Returns the manager's current number of active assembly lines.
+export async function getManagerLineSplitCount(managerId) {
+  const { data: rows } = await supabase
+    .from('job_events')
+    .select('line_id, job_id, event_type')
+    .eq('employee_id', managerId)
+    .in('event_type', ['START', 'RESUME', 'PAUSE', 'COMPLETE'])
+    .not('line_id', 'is', null)
+    .order('event_timestamp', { ascending: true })
+
+  if (!rows?.length) return 1
+
+  const jobStates = new Map()
+  for (const row of rows) {
+    jobStates.set(`${row.line_id}_${row.job_id}`, row)
+  }
+
+  const activeLines = new Set(
+    [...jobStates.values()]
+      .filter(r => r.event_type === 'START' || r.event_type === 'RESUME')
+      .map(r => r.line_id)
+  )
+  return Math.max(1, activeLines.size)
+}
+
+// Call BEFORE starting a new job on targetLineId.
+// Closes existing active intervals with old split_count and opens new ones with
+// the updated count.  Returns the split_count to use for the new START event.
+export async function prepareManagerLineStart(managerId, targetLineId) {
+  const { data: rows } = await supabase
+    .from('job_events')
+    .select('line_id, job_id, event_type, activity_type, work_type')
+    .eq('employee_id', managerId)
+    .in('event_type', ['START', 'RESUME', 'PAUSE', 'COMPLETE'])
+    .not('line_id', 'is', null)
+    .order('event_timestamp', { ascending: true })
+
+  if (!rows?.length) return 1
+
+  const jobStates = new Map()
+  for (const row of rows) {
+    jobStates.set(`${row.line_id}_${row.job_id}`, row)
+  }
+
+  const activeJobs = [...jobStates.values()].filter(
+    r => r.event_type === 'START' || r.event_type === 'RESUME'
+  )
+  const activeLines   = new Set(activeJobs.map(r => r.line_id))
+  const isNewLine     = !activeLines.has(targetLineId)
+  const newSplitCount = activeLines.size + (isNewLine ? 1 : 0)
+
+  if (newSplitCount > 1 && activeJobs.length > 0) {
+    const now = new Date().toISOString()
+    for (const j of activeJobs) {
+      await supabase.from('job_events').insert({
+        employee_id: managerId, job_id: j.job_id, event_type: 'PAUSE',
+        line_id: j.line_id, event_timestamp: now
+      })
+      await supabase.from('job_events').insert({
+        employee_id: managerId, job_id: j.job_id, event_type: 'RESUME',
+        line_id: j.line_id, activity_type: j.activity_type, work_type: j.work_type,
+        split_count: newSplitCount, event_timestamp: now
+      })
+    }
+  }
+
+  return Math.max(1, newSplitCount)
+}
+
+// Call AFTER a manager job ends (COMPLETE or last job on a line finished).
+// Recounts active lines and updates remaining jobs with the new split_count.
+export async function onManagerLineEnd(managerId) {
+  const { data: rows } = await supabase
+    .from('job_events')
+    .select('line_id, job_id, event_type, activity_type, work_type')
+    .eq('employee_id', managerId)
+    .in('event_type', ['START', 'RESUME', 'PAUSE', 'COMPLETE'])
+    .not('line_id', 'is', null)
+    .order('event_timestamp', { ascending: true })
+
+  if (!rows?.length) return 1
+
+  const jobStates = new Map()
+  for (const row of rows) {
+    jobStates.set(`${row.line_id}_${row.job_id}`, row)
+  }
+
+  const activeJobs    = [...jobStates.values()].filter(
+    r => r.event_type === 'START' || r.event_type === 'RESUME'
+  )
+  const activeLines   = new Set(activeJobs.map(r => r.line_id))
+  const newSplitCount = Math.max(1, activeLines.size)
+
+  if (activeJobs.length > 0) {
+    const now = new Date().toISOString()
+    for (const j of activeJobs) {
+      await supabase.from('job_events').insert({
+        employee_id: managerId, job_id: j.job_id, event_type: 'PAUSE',
+        line_id: j.line_id, event_timestamp: now
+      })
+      await supabase.from('job_events').insert({
+        employee_id: managerId, job_id: j.job_id, event_type: 'RESUME',
+        line_id: j.line_id, activity_type: j.activity_type, work_type: j.work_type,
+        split_count: newSplitCount, event_timestamp: now
+      })
+    }
+  }
+
+  return newSplitCount
+}
+
 // ── Manager live report ───────────────────────────────────────────────────────
-// Returns all active/paused job states across every department.
-// Assembly is grouped by line+job with team members listed.
 
 export async function loadManagerReport() {
   const { data: rows, error } = await supabase
     .from('job_events')
     .select(`
-      event_id, job_id, employee_id, event_type, hold_reason, line_id, event_timestamp,
+      event_id, job_id, employee_id, event_type, hold_reason, line_id, split_count, event_timestamp,
       jobs ( job_id, po_number, part_number, quantity ),
       employees ( employee_id, full_name, department, sub_department, active )
     `)
@@ -371,13 +498,8 @@ export async function loadManagerReport() {
   if (error) throw error
   if (!rows?.length) return { individual: {}, assembly: {} }
 
-  // ── Individual departments (weld / paint / kitting) ────────────────────────
-  // Key: employee_id → job_id → {job, events, emp}
   const empMap = new Map()
-
-  // ── Assembly ───────────────────────────────────────────────────────────────
-  // Key: lineId_jobId → {job, lineId, events (deduped), empStates}
-  const asmMap = new Map()
+  const asmMap = new Map() // lineId_jobId → {job, lineId, events, empStates}
 
   for (const row of rows) {
     if (!row.jobs || !row.employees || !row.employees.active) continue
@@ -397,17 +519,16 @@ export async function loadManagerReport() {
         })
       }
       const entry = asmMap.get(key)
-      // Deduplicate events by type+timestamp (whole team fires simultaneously)
-      const eKey = `${row.event_type}_${row.event_timestamp}`
+      const eKey  = `${row.event_type}_${row.event_timestamp}`
       if (!entry.seenKeys.has(eKey)) {
         entry.seenKeys.add(eKey)
         entry.events.push({
           event_type:      row.event_type,
           hold_reason:     row.hold_reason,
+          split_count:     row.split_count ?? 1,
           event_timestamp: row.event_timestamp
         })
       }
-      // Track per-employee state for team display
       entry.empStates.set(emp.employee_id, {
         employee_id: emp.employee_id,
         full_name:   emp.full_name,
@@ -424,13 +545,13 @@ export async function loadManagerReport() {
       empEntry.jobMap.get(row.job_id).events.push({
         event_type:      row.event_type,
         hold_reason:     row.hold_reason,
+        split_count:     row.split_count ?? 1,
         event_timestamp: row.event_timestamp
       })
     }
   }
 
-  // ── Build individual result grouped by department ──────────────────────────
-  const individual = {} // dept → [{emp, jobs: [{...job, events, isActive}]}]
+  const individual = {}
   for (const { emp, jobMap } of empMap.values()) {
     const dept = emp.department
     if (!individual[dept]) individual[dept] = []
@@ -447,8 +568,7 @@ export async function loadManagerReport() {
     if (jobs.length) individual[dept].push({ emp, jobs })
   }
 
-  // ── Build assembly result grouped by lineId → jobs ────────────────────────
-  const assembly = {} // lineId → [{job, events, isActive, holdReason, team}]
+  const assembly = {}
   for (const { job, lineId, events, empStates } of asmMap.values()) {
     if (!assembly[lineId]) assembly[lineId] = []
     const last = events[events.length - 1]
@@ -460,9 +580,7 @@ export async function loadManagerReport() {
       e => e.lastEvent === 'START' || e.lastEvent === 'RESUME'
     )
     assembly[lineId].push({
-      job,
-      events,
-      isActive,
+      job, events, isActive,
       holdReason: isActive ? null : last.hold_reason,
       team
     })
@@ -472,13 +590,6 @@ export async function loadManagerReport() {
 }
 
 // ── Session resume ───────────────────────────────────────────────────────────
-//
-// Jobs keep running even when the welder is not logged into the scanner —
-// "Done" and inactivity timeout just reset the screen, they don't pause jobs.
-// Only a manual Pause stops the clock.
-//
-// On login we just need to check how many jobs are currently active so we
-// can restore split mode automatically if more than one is running.
 
 export async function handleSessionResume(employeeId) {
   const { data: rows } = await supabase
@@ -490,7 +601,6 @@ export async function handleSessionResume(employeeId) {
 
   if (!rows || rows.length === 0) return { splitMode: false }
 
-  // Find each job's last relevant event
   const jobLastEvent = new Map()
   for (const ev of rows) {
     jobLastEvent.set(ev.job_id, ev.event_type)

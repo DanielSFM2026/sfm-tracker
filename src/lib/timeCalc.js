@@ -1,29 +1,34 @@
 const DAY_MAP = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
 
-// ── Internal: build [{start, end}] intervals from a single job's events ──────
+// ── Internal: build [{start, end, splitCount}] intervals from a job's events ──
+// split_count is stored on each START/RESUME event in the DB (DEFAULT 1).
+// Storing it per-interval means turning split on/off PERMANENTLY bakes the
+// divided time into history — toggling does not retroactively change past time.
 
 function getIntervals(events, asOf = new Date()) {
   const sorted = [...events].sort(
     (a, b) => new Date(a.event_timestamp) - new Date(b.event_timestamp)
   )
   const intervals = []
-  let openStart = null
+  let openStart      = null
+  let openSplitCount = 1
 
   for (const ev of sorted) {
     if (ev.event_type === 'START' || ev.event_type === 'RESUME') {
-      openStart = new Date(ev.event_timestamp)
+      openStart      = new Date(ev.event_timestamp)
+      openSplitCount = ev.split_count ?? 1
     } else if (
       ev.event_type === 'PAUSE' ||
       ev.event_type === 'COMPLETE' ||
       ev.event_type === 'AUTO_LOGOUT'
     ) {
       if (openStart) {
-        intervals.push({ start: openStart, end: new Date(ev.event_timestamp) })
+        intervals.push({ start: openStart, end: new Date(ev.event_timestamp), splitCount: openSplitCount })
         openStart = null
       }
     }
   }
-  if (openStart) intervals.push({ start: openStart, end: asOf })
+  if (openStart) intervals.push({ start: openStart, end: asOf, splitCount: openSplitCount })
   return intervals
 }
 
@@ -45,14 +50,14 @@ function subtractBreaks(ms, start, end, breakRules) {
   return ms
 }
 
-// ── Standard accrued time (all closed + open intervals) ─────────────────────
+// ── Standard accrued time — each interval divided by its stored split_count ──
 
 export function calcAccruedMs(events, breakRules, asOf = new Date()) {
   let totalMs = 0
-  for (const { start, end } of getIntervals(events, asOf)) {
+  for (const { start, end, splitCount } of getIntervals(events, asOf)) {
     let ms = end.getTime() - start.getTime()
     ms = subtractBreaks(ms, start, end, breakRules)
-    totalMs += ms
+    totalMs += Math.max(0, ms) / splitCount
   }
   return Math.max(0, totalMs)
 }
@@ -72,29 +77,10 @@ export function getOpenStart(events) {
   return null
 }
 
-// ── Split-aware elapsed time ──────────────────────────────────────────────────
-//
-// Historical (closed) intervals always get full credit — split mode only
-// affects the CURRENT open interval, dividing it equally across splitCount jobs.
-// This means toggling split on/off never retroactively changes past time.
+// ── Elapsed time — split_count is now stored in events, no parameter needed ──
 
-export function calcElapsed(events, breakRules, splitCount = 1, asOf = new Date()) {
-  const openStart = getOpenStart(events)
-
-  // Job is paused — just return total historical time
-  if (!openStart) return calcAccruedMs(events, breakRules, asOf)
-
-  // Historical time: everything up to when the current interval started
-  const historicalMs = calcAccruedMs(events, breakRules, openStart)
-
-  // Current interval time (with break deduction)
-  const fullMs    = calcAccruedMs(events, breakRules, asOf)
-  let currentMs   = fullMs - historicalMs
-
-  // Only divide the live portion
-  if (splitCount > 1) currentMs = currentMs / splitCount
-
-  return Math.max(0, historicalMs + currentMs)
+export function calcElapsed(events, breakRules, asOf = new Date()) {
+  return calcAccruedMs(events, breakRules, asOf)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
