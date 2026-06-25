@@ -341,13 +341,13 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={handleSplitToggle}
-            className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-semibold transition-colors ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-sm font-semibold transition-colors ${
               splitMode
                 ? 'bg-sky-500/20 border-sky-500 text-sky-400'
                 : 'bg-stone-800 border-stone-600 text-stone-400'
             }`}
           >
-            <span className="text-lg leading-none">⚡</span>
+            <span className="text-base leading-none">⚡</span>
             <span>
               Split
               {splitMode && activeCount > 1 && (
