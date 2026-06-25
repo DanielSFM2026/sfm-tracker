@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%       { transform: translateX(-8px); }
+  40%       { transform: translateX(8px); }
+  60%       { transform: translateX(-6px); }
+  80%       { transform: translateX(6px); }
+}
+.animate-shake { animation: shake 0.5s ease-in-out; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #1c1917; /* stone-900 */
+  color: #fafaf9;             /* stone-50 */
+  font-family: system-ui, -apple-system, sans-serif;
+  /* prevent pull-to-refresh and text selection on kiosk */
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* hide the scan input visually but keep it focusable */
+.scan-input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+/* big kiosk button base */
+.btn {
+  @apply flex items-center justify-center rounded-xl font-semibold text-lg
+         transition-transform active:scale-95 select-none cursor-pointer;
+  min-height: 3.5rem;
+  touch-action: manipulation;
+}
+
+.btn-primary   { @apply btn bg-amber-500 text-stone-900; }
+.btn-secondary { @apply btn bg-stone-700 text-stone-100; }
+.btn-danger    { @apply btn bg-red-700 text-white; }
+.btn-green     { @apply btn bg-emerald-600 text-white; }
+.btn-ghost     { @apply btn border border-stone-600 text-stone-300; }
