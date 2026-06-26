@@ -82,18 +82,19 @@ export async function loadEmployeeJobs(employeeId) {
 
 // ── Find or create a job by PO + part ────────────────────────────────────────
 
-export async function findOrCreateJob(poNumber, partNumber) {
+export async function findOrCreateJob(poNumber, partNumber, department = 'weld') {
   const { data: existing } = await supabase
     .from('jobs')
     .select('*')
     .eq('po_number', poNumber)
     .eq('part_number', partNumber)
+    .eq('department', department)
     .maybeSingle()
   if (existing) return { job: existing, created: false }
 
   const { data, error } = await supabase
     .from('jobs')
-    .insert({ po_number: poNumber, part_number: partNumber, status: 'not_started' })
+    .insert({ po_number: poNumber, part_number: partNumber, department, status: 'not_started' })
     .select()
     .single()
   if (error) throw error
@@ -341,7 +342,7 @@ export async function loadMyAssemblyJobs(employeeId) {
     .from('job_events')
     .select(`
       event_id, job_id, employee_id, event_type, hold_reason, line_id, split_count, event_timestamp,
-      jobs ( job_id, po_number, part_number, quantity, status ),
+      jobs ( job_id, po_number, part_number, quantity, status, department ),
       employees ( employee_id, full_name, badge_code, is_line_manager )
     `)
     .in('job_id', jobIds)
@@ -357,6 +358,7 @@ export async function loadMyAssemblyJobs(employeeId) {
   const jobMap = new Map()
   for (const row of rows) {
     if (!row.jobs || !row.employees) continue
+    if (row.jobs.department !== 'assembly') continue
     if (!['in_progress','paused'].includes(row.jobs.status)) continue
 
     if (!jobMap.has(row.job_id)) {

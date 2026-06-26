@@ -436,7 +436,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
     const part = raw.slice(idx + 1).trim()
     setScanning(true); setError('')
     try {
-      const { job } = await findOrCreateJob(po, part)
+      const { job } = await findOrCreateJob(po, part, 'assembly')
       if (jobs.find(j => j.job_id === job.job_id)) {
         setError(`PO ${po} / ${part} is already on your list.`)
         return
