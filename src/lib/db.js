@@ -495,7 +495,7 @@ export async function loadManagerReport() {
     .from('job_events')
     .select(`
       event_id, job_id, employee_id, event_type, hold_reason, line_id, split_count, event_timestamp,
-      jobs ( job_id, po_number, part_number, quantity ),
+      jobs ( job_id, po_number, part_number, quantity, status ),
       employees ( employee_id, full_name, department, sub_department, active )
     `)
     .in('event_type', ['START','PAUSE','RESUME','COMPLETE','AUTO_LOGOUT'])
@@ -509,6 +509,7 @@ export async function loadManagerReport() {
 
   for (const row of rows) {
     if (!row.jobs || !row.employees || !row.employees.active) continue
+    if (!['in_progress', 'paused'].includes(row.jobs.status)) continue
     const emp  = row.employees
     const dept = emp.department
 
