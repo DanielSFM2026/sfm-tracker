@@ -303,23 +303,49 @@ export default function ManagerReport({ onBack }) {
             {(() => {
               const workers = report.individual.paint ?? []
               const active  = workers.filter(w => w.jobs.some(j => j.isActive)).length
+              const PAINT_ORDER = ['blast','prep','paint','pack']
+              const PAINT_LABEL = { blast: 'Blast', prep: 'Prep', paint: 'Paint', pack: 'Pack' }
+              const grouped = PAINT_ORDER.map(sub => ({
+                sub,
+                label: PAINT_LABEL[sub],
+                workers: workers.filter(w => w.emp.sub_department === sub)
+              })).filter(g => g.workers.length > 0)
+
               return (
-                <Section
-                  title="Paint Shop"
-                  badge={active > 0 ? `${active} active` : 'none active'}
-                  badgeColour={active > 0 ? 'bg-purple-500/20 text-purple-400' : 'bg-stone-700 text-stone-500'}
-                  empty={workers.length === 0}
-                >
-                  {workers
-                    .sort((a, b) => {
-                      const order = ['blast','prep','paint','pack']
-                      return order.indexOf(a.emp.sub_department) - order.indexOf(b.emp.sub_department)
-                    })
-                    .map(({ emp, jobs }) => (
-                      <WorkerRow key={emp.employee_id} emp={emp} jobs={jobs} breakRules={breakRules} />
-                    ))
-                  }
-                </Section>
+                <div className="bg-stone-900 rounded-2xl border border-stone-700 overflow-hidden">
+                  <div className="flex items-center gap-3 px-4 py-3 border-b border-stone-700 bg-stone-800/60">
+                    <h2 className="text-sm font-bold uppercase tracking-widest text-stone-300">Paint Shop</h2>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                      active > 0 ? 'bg-purple-500/20 text-purple-400' : 'bg-stone-700 text-stone-500'
+                    }`}>
+                      {active > 0 ? `${active} active` : 'none active'}
+                    </span>
+                  </div>
+                  {workers.length === 0 ? (
+                    <p className="text-stone-600 text-sm px-4 py-5 text-center">No active jobs</p>
+                  ) : (
+                    <div className="divide-y divide-stone-700">
+                      {grouped.map(({ sub, label, workers: grpWorkers }) => {
+                        const grpActive = grpWorkers.filter(w => w.jobs.some(j => j.isActive)).length
+                        return (
+                          <div key={sub}>
+                            <div className="flex items-center gap-3 px-4 py-2.5 bg-stone-800/60 border-l-2 border-purple-600">
+                              <span className="text-xs font-bold text-purple-300 uppercase tracking-wider">{label}</span>
+                              {grpActive > 0 && (
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-400">
+                                  {grpActive} active
+                                </span>
+                              )}
+                            </div>
+                            {grpWorkers.map(({ emp, jobs }) => (
+                              <WorkerRow key={emp.employee_id} emp={emp} jobs={jobs} breakRules={breakRules} />
+                            ))}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
               )
             })()}
 
