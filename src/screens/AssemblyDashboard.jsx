@@ -3,7 +3,7 @@ import {
   fetchAssemblyLines, loadMyAssemblyJobs, findOrCreateJob, findTeamMember,
   addTeamMemberToJob, removeTeamMemberFromJob, removeTeamMemberPermanently,
   startAssemblyJob, holdAssemblyJob, completeAssemblyJob, fetchBreakRules,
-  prepareManagerLineStart, onManagerLineEnd
+  prepareManagerLineStart, onManagerLineEnd, setJobStatus
 } from '../lib/db'
 import { isJobActive, calcElapsed, formatDuration } from '../lib/timeCalc'
 import { HOLD_REASONS } from '../lib/constants'
@@ -512,7 +512,10 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
           : 1
         const ev = await addTeamMemberToJob(employee.employee_id, jobId, job.line_id, splitCount)
         appendMemberEvent(jobId, employee.employee_id, ev)
-        if (job.status === 'paused') setJobStatusLocal(jobId, 'in_progress')
+        if (job.status === 'paused') {
+          await setJobStatus(jobId, 'in_progress')
+          setJobStatusLocal(jobId, 'in_progress')
+        }
         if (isLM) {
           loadMyAssemblyJobs(employee.employee_id).then(setJobs).catch(console.error)
         }
@@ -541,7 +544,10 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
       } else {
         const ev = await addTeamMemberToJob(targetId, jobId, job.line_id)
         appendMemberEvent(jobId, targetId, ev)
-        if (job.status === 'paused') setJobStatusLocal(jobId, 'in_progress')
+        if (job.status === 'paused') {
+          await setJobStatus(jobId, 'in_progress')
+          setJobStatusLocal(jobId, 'in_progress')
+        }
       }
     } catch (err) {
       console.error(err)
