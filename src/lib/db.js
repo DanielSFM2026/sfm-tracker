@@ -321,6 +321,128 @@ export async function loadWorkerJobs(employeeId) {
   })
 }
 
+// ── Load all assembly jobs for any employee (LM or team member) ───────────────
+// Returns every in_progress/paused job this person is on, with full team data.
+
+export async function loadMyAssemblyJobs(employeeId) {
+  // Step 1: which jobs is this employee involved in?
+  const { data: mine, error: e1 } = await supabase
+    .from('job_events')
+    .select('job_id')
+    .eq('employee_id', employeeId)
+    .in('event_type', ['START','RESUME','PAUSE','COMPLETE'])
+  if (e1) throw e1
+  if (!mine?.length) return []
+
+  const jobIds = [...new Set(mine.map(r => r.job_id))]
+
+  // Step 2: load all events for those jobs (every participant)
+  const { data: rows, error: e2 } = await supabase
+    .from('job_events')
+    .select(`
+      event_id, job_id, employee_id, event_type, hold_reason, line_id, split_count, event_timestamp,
+      jobs ( job_id, po_number, part_number, quantity, status ),
+      employees ( employee_id, full_name, badge_code, is_line_manager )
+    `)
+    .in('job_id', jobIds)
+    .in('event_type', ['START','RESUME','PAUSE','COMPLETE','AUTO_LOGOUT'])
+    .order('event_timestamp', { ascending: true })
+  if (e2) throw e2
+
+  // Step 3: line names
+  const { data: lines } = await supabase.from('assembly_lines').select('line_id, line_name')
+  const lineMap = Object.fromEntries((lines ?? []).map(l => [l.line_id, l.line_name]))
+
+  // Step 4: group by job
+  const jobMap = new Map()
+  for (const row of rows) {
+    if (!row.jobs || !row.employees) continue
+    if (!['in_progress','paused'].includes(row.jobs.status)) continue
+
+    if (!jobMap.has(row.job_id)) {
+      jobMap.set(row.job_id, { ...row.jobs, line_id: null, line_name: null, empData: new Map() })
+    }
+    const job = jobMap.get(row.job_id)
+    if (row.line_id) {
+      job.line_id   = row.line_id
+      job.line_name = lineMap[row.line_id] ?? `Line ${row.line_id}`
+    }
+
+    const emp = row.employees
+    if (!job.empData.has(emp.employee_id)) {
+      job.empData.set(emp.employee_id, {
+        employee_id:    emp.employee_id,
+        full_name:      emp.full_name,
+        badge_code:     emp.badge_code,
+        is_line_manager: emp.is_line_manager ?? false,
+        events: []
+      })
+    }
+    job.empData.get(emp.employee_id).events.push({
+      event_id:        row.event_id,
+      event_type:      row.event_type,
+      hold_reason:     row.hold_reason,
+      split_count:     row.split_count ?? 1,
+      event_timestamp: row.event_timestamp
+    })
+  }
+
+  // Step 5: filter to jobs where current employee hasn't been permanently removed
+  const result = []
+  for (const [, job] of jobMap) {
+    const { empData, ...jobFields } = job
+    const myEntry = empData.get(employeeId)
+    if (!myEntry) continue
+    const myLast = myEntry.events[myEntry.events.length - 1]
+    if (myLast?.event_type === 'COMPLETE') continue
+
+    jobFields.team = [...empData.values()].filter(m => {
+      const last = m.events[m.events.length - 1]
+      return last?.event_type !== 'COMPLETE'
+    })
+    result.push(jobFields)
+  }
+  return result
+}
+
+// ── Start a new assembly job (LM scans barcode, picks line) ───────────────────
+export async function startAssemblyJob(managerId, jobId, lineId) {
+  const ev = await insertEvent({
+    employee_id: managerId, job_id: jobId, event_type: 'START',
+    line_id: lineId, split_count: 1
+  })
+  await setJobStatus(jobId, 'in_progress')
+  return ev
+}
+
+// ── Hold a job — pause all active members with a reason ───────────────────────
+export async function holdAssemblyJob(jobId, lineId, holdReason, allActiveIds) {
+  if (!allActiveIds.length) { await setJobStatus(jobId, 'paused'); return [] }
+  const now = new Date().toISOString()
+  const { data, error } = await supabase.from('job_events')
+    .insert(allActiveIds.map(empId => ({
+      employee_id: empId, job_id: jobId, event_type: 'PAUSE',
+      line_id: lineId, hold_reason: holdReason, event_timestamp: now, split_count: 1
+    }))).select()
+  if (error) throw error
+  await setJobStatus(jobId, 'paused')
+  return data
+}
+
+// ── Complete a job — fire COMPLETE for all still-active members ───────────────
+export async function completeAssemblyJob(jobId, lineId, allActiveIds) {
+  if (allActiveIds.length) {
+    const now = new Date().toISOString()
+    const { error } = await supabase.from('job_events')
+      .insert(allActiveIds.map(empId => ({
+        employee_id: empId, job_id: jobId, event_type: 'COMPLETE',
+        line_id: lineId, event_timestamp: now, split_count: 1
+      })))
+    if (error) throw error
+  }
+  await setJobStatus(jobId, 'completed')
+}
+
 // ── Add / remove a team member from a specific assembly job ───────────────────
 
 export async function addTeamMemberToJob(employeeId, jobId, lineId) {
@@ -342,7 +464,7 @@ export async function removeTeamMemberPermanently(employeeId, jobId, lineId) {
 export async function findTeamMember(badgeCode) {
   const { data, error } = await supabase
     .from('employees')
-    .select('employee_id, full_name, badge_code, department')
+    .select('employee_id, full_name, badge_code, department, is_line_manager')
     .eq('badge_code', badgeCode.trim())
     .eq('active', true)
     .maybeSingle()

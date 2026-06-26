@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react'
 import { fetchBreakRules } from './lib/db'
 import BadgeScanScreen    from './screens/BadgeScanScreen'
 import DashboardScreen    from './screens/DashboardScreen'
-import AssemblyDashboard    from './screens/AssemblyDashboard'
-import AssemblyWorkerScreen from './screens/AssemblyWorkerScreen'
+import AssemblyDashboard   from './screens/AssemblyDashboard'
 import PaintDashboard     from './screens/PaintDashboard'
 import KittingDashboard   from './screens/KittingDashboard'
 import ManagerReport      from './screens/ManagerReport'
@@ -48,17 +47,6 @@ export default function App() {
 
   if (screen === 'report') {
     return <ManagerReport onBack={() => setScreen('badge')} />
-  }
-
-  // Assembly workers who aren't line managers get a simplified clock on/off screen
-  if (employee?.department === 'assembly' && !employee?.is_line_manager) {
-    return (
-      <AssemblyWorkerScreen
-        employee={employee}
-        breakRules={breakRules}
-        onLogout={handleLogout}
-      />
-    )
   }
 
   const DeptScreen = DEPT_SCREEN[employee?.department] ?? DashboardScreen
