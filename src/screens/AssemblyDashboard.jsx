@@ -319,16 +319,14 @@ function AssemblyJobCard({ job, currentEmployee, breakRules, isLM, onToggleSelf,
                   active
                     ? isMe
                       ? 'bg-amber-500/30 border-amber-500 text-amber-200 ring-2 ring-amber-500 font-semibold'
-                      : isThisLM
-                      ? 'bg-amber-500/15 border-amber-500/40 text-amber-400'
-                      : 'bg-stone-700 border-stone-600 text-stone-300'
-                    : isThisLM
-                    ? 'bg-stone-800 border-amber-800/50 text-amber-700'
-                    : 'bg-stone-800 border-stone-700 text-stone-600',
+                      : 'bg-stone-700 border-stone-600 text-stone-200'
+                    : isMe
+                      ? 'bg-stone-800 border-stone-600 text-stone-500'
+                      : 'bg-stone-800 border-stone-700 text-stone-600',
                   tappable ? 'cursor-pointer active:scale-95' : 'cursor-default select-none',
                 ].join(' ')}
               >
-                {isThisLM && <span className="font-bold text-[10px] tracking-wider opacity-70">LM</span>}
+                {isThisLM && <span className="font-bold text-[10px] tracking-wider text-amber-500">LM</span>}
                 {isMe ? '● You' : m.full_name}
               </button>
             )
