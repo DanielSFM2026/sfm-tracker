@@ -517,29 +517,28 @@ export async function loadManagerReport() {
       const key = `${row.line_id}_${row.job_id}`
       if (!asmMap.has(key)) {
         asmMap.set(key, {
-          job:       row.jobs,
-          lineId:    row.line_id,
-          events:    [],
-          seenKeys:  new Set(),
-          empStates: new Map()
+          job:      row.jobs,
+          lineId:   row.line_id,
+          empData:  new Map()   // empId → { full_name, events[], lastEvent }
         })
       }
       const entry = asmMap.get(key)
-      const eKey  = `${row.event_type}_${row.event_timestamp}`
-      if (!entry.seenKeys.has(eKey)) {
-        entry.seenKeys.add(eKey)
-        entry.events.push({
-          event_type:      row.event_type,
-          hold_reason:     row.hold_reason,
-          split_count:     row.split_count ?? 1,
-          event_timestamp: row.event_timestamp
+      if (!entry.empData.has(emp.employee_id)) {
+        entry.empData.set(emp.employee_id, {
+          employee_id: emp.employee_id,
+          full_name:   emp.full_name,
+          events:      [],
+          lastEvent:   null
         })
       }
-      entry.empStates.set(emp.employee_id, {
-        employee_id: emp.employee_id,
-        full_name:   emp.full_name,
-        lastEvent:   row.event_type
+      const empEntry = entry.empData.get(emp.employee_id)
+      empEntry.events.push({
+        event_type:      row.event_type,
+        hold_reason:     row.hold_reason,
+        split_count:     row.split_count ?? 1,
+        event_timestamp: row.event_timestamp
       })
+      empEntry.lastEvent = row.event_type
     } else {
       if (!empMap.has(emp.employee_id)) {
         empMap.set(emp.employee_id, { emp, jobMap: new Map() })
@@ -575,20 +574,30 @@ export async function loadManagerReport() {
   }
 
   const assembly = {}
-  for (const { job, lineId, events, empStates } of asmMap.values()) {
+  for (const { job, lineId, empData } of asmMap.values()) {
     if (!assembly[lineId]) assembly[lineId] = []
-    const last = events[events.length - 1]
-    if (!last) continue
-    const isActive = last.event_type === 'START' || last.event_type === 'RESUME'
-    const isHeld   = last.event_type === 'PAUSE'
-    if (!isActive && !isHeld) continue
-    const team = [...empStates.values()].filter(
-      e => e.lastEvent === 'START' || e.lastEvent === 'RESUME'
-    )
+    const members = [...empData.values()]
+    if (!members.length) continue
+
+    // Job is active/held if any member is active/held
+    const anyActive = members.some(m => m.lastEvent === 'START' || m.lastEvent === 'RESUME')
+    const anyHeld   = !anyActive && members.some(m => m.lastEvent === 'PAUSE')
+    if (!anyActive && !anyHeld) continue
+
+    // Hold reason from the most recent PAUSE event across all members
+    const lastPauseEv = members
+      .flatMap(m => m.events)
+      .filter(e => e.event_type === 'PAUSE' && e.hold_reason)
+      .sort((a, b) => new Date(b.event_timestamp) - new Date(a.event_timestamp))[0]
+
+    const activeTeam = members.filter(m => m.lastEvent === 'START' || m.lastEvent === 'RESUME')
+
     assembly[lineId].push({
-      job, events, isActive,
-      holdReason: isActive ? null : last.hold_reason,
-      team
+      job,
+      members,       // all members with individual events arrays — used for total time calc
+      isActive: anyActive,
+      holdReason: lastPauseEv?.hold_reason ?? null,
+      team: activeTeam
     })
   }
 

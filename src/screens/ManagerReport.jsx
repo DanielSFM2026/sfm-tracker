@@ -83,9 +83,32 @@ function WorkerRow({ emp, jobs, breakRules }) {
   )
 }
 
+// ── Assembly total timer — sums credited hours across all team members ────────
+// Each member's events carry their own split_count, so calcElapsed handles
+// manager line-split and team member time correctly without mixing events.
+function AssemblyTotalTimer({ members, breakRules, isActive }) {
+  function compute() {
+    return members.reduce((sum, m) => sum + calcElapsed(m.events, breakRules), 0)
+  }
+  const [ms, setMs] = useState(compute)
+  useEffect(() => {
+    setMs(compute())
+    if (!isActive) return
+    const id = setInterval(() => setMs(compute()), 1000)
+    return () => clearInterval(id)
+  }, [isActive, members, breakRules])
+  return (
+    <span className={`font-mono font-bold text-lg tabular-nums ${
+      isActive ? 'text-amber-400' : 'text-stone-500'
+    }`}>
+      {formatDuration(ms)}
+    </span>
+  )
+}
+
 // ── Assembly line job row ─────────────────────────────────────────────────────
 function AssemblyJobRow({ entry, breakRules }) {
-  const { job, events, isActive, holdReason, team } = entry
+  const { job, members, isActive, holdReason, team } = entry
   return (
     <div className="border-b border-stone-800 last:border-0 px-4 py-3">
       <div className="flex items-center gap-3">
@@ -106,7 +129,7 @@ function AssemblyJobRow({ entry, breakRules }) {
             </p>
           )}
         </div>
-        <LiveTimer events={events} breakRules={breakRules} isActive={isActive} />
+        <AssemblyTotalTimer members={members} breakRules={breakRules} isActive={isActive} />
       </div>
     </div>
   )
