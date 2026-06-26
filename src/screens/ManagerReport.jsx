@@ -341,14 +341,14 @@ export default function ManagerReport({ onBack }) {
                   {asmLines.length === 0 ? (
                     <p className="text-stone-600 text-sm px-4 py-5 text-center">No active jobs</p>
                   ) : (
-                    <div className="divide-y divide-stone-800">
+                    <div className="divide-y divide-stone-700">
                       {asmLines.map(([lineId, jobs]) => {
                         const activeJobs = jobs.filter(j => j.isActive).length
                         return (
                           <div key={lineId}>
                             {/* Line sub-header */}
-                            <div className="flex items-center gap-3 px-4 py-2 bg-stone-800/30">
-                              <span className="text-xs font-semibold text-sky-400 uppercase tracking-wider">
+                            <div className="flex items-center gap-3 px-4 py-2.5 bg-stone-800/60 border-l-2 border-sky-600">
+                              <span className="text-xs font-bold text-sky-300 uppercase tracking-wider">
                                 {lineMap[lineId] ?? `Line ${lineId}`}
                               </span>
                               <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
