@@ -158,7 +158,6 @@ export default function BadgeScanScreen({ onLogin, onManagerView }) {
         ref={inputRef}
         className="scan-input"
         type="text"
-        inputMode="none"
         autoComplete="off"
         autoCorrect="off"
         spellCheck={false}
@@ -190,6 +189,7 @@ export default function BadgeScanScreen({ onLogin, onManagerView }) {
       </div>
 
       <button
+        onTouchStart={() => inputRef.current?.blur()}
         onClick={() => setShowPin(true)}
         className="text-stone-600 hover:text-stone-400 text-sm underline transition-colors"
       >
