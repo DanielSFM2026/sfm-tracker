@@ -407,9 +407,10 @@ export async function loadMyAssemblyJobs(employeeId) {
 
 // ── Start a new assembly job (LM scans barcode, picks line) ───────────────────
 export async function startAssemblyJob(managerId, jobId, lineId) {
+  const splitCount = await prepareManagerLineStart(managerId, lineId)
   const ev = await insertEvent({
     employee_id: managerId, job_id: jobId, event_type: 'START',
-    line_id: lineId, split_count: 1
+    line_id: lineId, split_count: splitCount
   })
   await setJobStatus(jobId, 'in_progress')
   return ev
@@ -445,12 +446,12 @@ export async function completeAssemblyJob(jobId, lineId, allActiveIds) {
 
 // ── Add / remove a team member from a specific assembly job ───────────────────
 
-export async function addTeamMemberToJob(employeeId, jobId, lineId) {
-  return insertEvent({ employee_id: employeeId, job_id: jobId, event_type: 'START', line_id: lineId })
+export async function addTeamMemberToJob(employeeId, jobId, lineId, splitCount = 1) {
+  return insertEvent({ employee_id: employeeId, job_id: jobId, event_type: 'START', line_id: lineId, split_count: splitCount })
 }
 
 export async function removeTeamMemberFromJob(employeeId, jobId, lineId) {
-  return insertEvent({ employee_id: employeeId, job_id: jobId, event_type: 'PAUSE', line_id: lineId })
+  return insertEvent({ employee_id: employeeId, job_id: jobId, event_type: 'PAUSE', line_id: lineId, split_count: 1 })
 }
 
 // Permanently remove a team member from a job (COMPLETE for that person only).

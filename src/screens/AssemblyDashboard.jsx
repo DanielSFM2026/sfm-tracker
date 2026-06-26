@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   fetchAssemblyLines, loadMyAssemblyJobs, findOrCreateJob, findTeamMember,
   addTeamMemberToJob, removeTeamMemberFromJob, removeTeamMemberPermanently,
-  startAssemblyJob, holdAssemblyJob, completeAssemblyJob, fetchBreakRules
+  startAssemblyJob, holdAssemblyJob, completeAssemblyJob, fetchBreakRules,
+  prepareManagerLineStart, onManagerLineEnd
 } from '../lib/db'
 import { isJobActive, calcElapsed, formatDuration } from '../lib/timeCalc'
 import { HOLD_REASONS } from '../lib/constants'
@@ -228,6 +229,7 @@ function AssemblyJobCard({ job, currentEmployee, breakRules, isLM, onToggleSelf,
   })
 
   const anyPersonActive = visibleTeam.some(m => isJobActive(m.events))
+  const activeCount     = visibleTeam.filter(m => isJobActive(m.events)).length
 
   function computeTotal() {
     return visibleTeam.reduce((sum, m) => sum + calcElapsed(m.events, breakRules), 0)
@@ -261,8 +263,10 @@ function AssemblyJobCard({ job, currentEmployee, breakRules, isLM, onToggleSelf,
 
       {/* Line badge */}
       {job.line_name && (
-        <div className="bg-stone-900/80 border-b border-stone-700/60 px-5 py-2 flex items-center justify-between">
-          <span className="text-xs text-sky-400 font-semibold uppercase tracking-widest">
+        <div className={`border-b px-5 py-2.5 flex items-center justify-between ${
+          jobActive ? 'bg-sky-900/30 border-sky-700/40' : 'bg-stone-900/80 border-stone-700/60'
+        }`}>
+          <span className="text-sm font-bold text-sky-300 uppercase tracking-wider">
             {job.line_name}
           </span>
           {holdReason && (
@@ -287,6 +291,9 @@ function AssemblyJobCard({ job, currentEmployee, breakRules, isLM, onToggleSelf,
             <p className={`text-2xl font-mono font-bold ${anyPersonActive ? 'text-amber-400' : 'text-stone-500'}`}>
               {formatDuration(elapsed)}
             </p>
+            {activeCount > 0 && (
+              <p className="text-xs text-sky-400 mt-0.5">{activeCount} on line</p>
+            )}
           </div>
         </div>
 
@@ -479,14 +486,20 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
     const amActive = isJobActive(me.events)
     try {
       if (amActive) {
+        // Clock off — PAUSE this person. If LM, recalculate split on remaining jobs.
         const ev = await removeTeamMemberFromJob(employee.employee_id, jobId, job.line_id)
         appendMemberEvent(jobId, employee.employee_id, ev)
+        if (isLM) await onManagerLineEnd(employee.employee_id)
         const othersStillOn = job.team
           .filter(m => m.employee_id !== employee.employee_id)
           .some(m => isJobActive(m.events))
         if (!othersStillOn) setJobStatusLocal(jobId, 'paused')
       } else {
-        const ev = await addTeamMemberToJob(employee.employee_id, jobId, job.line_id)
+        // Clock on — RESUME/START. If LM, close existing intervals and get new split_count.
+        const splitCount = isLM
+          ? await prepareManagerLineStart(employee.employee_id, job.line_id)
+          : 1
+        const ev = await addTeamMemberToJob(employee.employee_id, jobId, job.line_id, splitCount)
         appendMemberEvent(jobId, employee.employee_id, ev)
         if (job.status === 'paused') setJobStatusLocal(jobId, 'in_progress')
       }
@@ -645,7 +658,9 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
           </div>
         )}
 
-        {jobs.map(job => (
+        {[...jobs]
+          .sort((a, b) => (a.line_id ?? 0) - (b.line_id ?? 0))
+          .map(job => (
           <AssemblyJobCard
             key={job.job_id}
             job={job}
