@@ -417,7 +417,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
         ...j,
         team: j.team.map(m =>
           m.employee_id === employeeId
-            ? { ...m, events: [...m.events, { ...ev, split_count: 1 }] }
+            ? { ...m, events: [...m.events, ev] }
             : m
         )
       }
@@ -457,20 +457,26 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
     try {
       const ev       = await startAssemblyJob(employee.employee_id, job.job_id, lineId)
       const lineName = lines.find(l => l.line_id === lineId)?.line_name ?? `Line ${lineId}`
-      setJobs(prev => [...prev, {
-        ...job,
-        status:    'in_progress',
-        line_id:   lineId,
-        line_name: lineName,
-        team: [{
-          employee_id:     employee.employee_id,
-          full_name:       employee.full_name,
-          badge_code:      employee.badge_code,
-          is_line_manager: true,
-          events: [{ event_type: 'START', event_timestamp: ev.event_timestamp, split_count: 1 }]
-        }]
-      }])
-      // Open team modal to add members straight away
+      // Reload all jobs — startAssemblyJob called prepareManagerLineStart which may have
+      // updated split_counts on existing jobs; reload picks all of that up correctly.
+      const fresh = await loadMyAssemblyJobs(employee.employee_id)
+      // If the new job isn't in DB yet (race), append it manually
+      if (!fresh.find(j => j.job_id === job.job_id)) {
+        fresh.push({
+          ...job,
+          status:    'in_progress',
+          line_id:   lineId,
+          line_name: lineName,
+          team: [{
+            employee_id:     employee.employee_id,
+            full_name:       employee.full_name,
+            badge_code:      employee.badge_code,
+            is_line_manager: true,
+            events: [{ event_type: 'START', event_timestamp: ev.event_timestamp, split_count: ev.split_count ?? 1 }]
+          }]
+        })
+      }
+      setJobs(fresh)
       setModal({ type: 'team', jobId: job.job_id })
     } catch (err) {
       console.error(err)
@@ -486,22 +492,30 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
     const amActive = isJobActive(me.events)
     try {
       if (amActive) {
-        // Clock off — PAUSE this person. If LM, recalculate split on remaining jobs.
+        // Clock off — PAUSE this person. If LM, recalculate split on remaining jobs then reload.
         const ev = await removeTeamMemberFromJob(employee.employee_id, jobId, job.line_id)
         appendMemberEvent(jobId, employee.employee_id, ev)
-        if (isLM) await onManagerLineEnd(employee.employee_id)
         const othersStillOn = job.team
           .filter(m => m.employee_id !== employee.employee_id)
           .some(m => isJobActive(m.events))
         if (!othersStillOn) setJobStatusLocal(jobId, 'paused')
+        if (isLM) {
+          await onManagerLineEnd(employee.employee_id)
+          // Reload all jobs so remaining jobs show updated split_count
+          loadMyAssemblyJobs(employee.employee_id).then(setJobs).catch(console.error)
+        }
       } else {
-        // Clock on — RESUME/START. If LM, close existing intervals and get new split_count.
+        // Clock on — if LM, prepareManagerLineStart updates other jobs' split_count in DB,
+        // then reload all jobs so those cards reflect the new split immediately.
         const splitCount = isLM
           ? await prepareManagerLineStart(employee.employee_id, job.line_id)
           : 1
         const ev = await addTeamMemberToJob(employee.employee_id, jobId, job.line_id, splitCount)
         appendMemberEvent(jobId, employee.employee_id, ev)
         if (job.status === 'paused') setJobStatusLocal(jobId, 'in_progress')
+        if (isLM) {
+          loadMyAssemblyJobs(employee.employee_id).then(setJobs).catch(console.error)
+        }
       }
     } catch (err) {
       console.error(err)
