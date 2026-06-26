@@ -343,23 +343,21 @@ function AssemblyJobCard({ job, currentEmployee, breakRules, isLM, onToggleSelf,
           )}
         </div>
 
-        {/* LM action buttons */}
-        {isLM && (
-          <div className="flex gap-2">
-            {jobActive && (
-              <button
-                className="flex-1 py-3 text-base rounded-xl border border-orange-700 bg-orange-950/40 text-orange-400"
-                onClick={() => onHold(job.job_id)}>
-                ⚠ Hold
-              </button>
-            )}
+        {/* Action buttons — all assembly users */}
+        <div className="flex gap-2">
+          {jobActive && (
             <button
-              className="btn-green flex-1 py-3 text-base"
-              onClick={() => onComplete(job.job_id)}>
-              ✓ Complete
+              className="flex-1 py-3 text-base rounded-xl border border-orange-700 bg-orange-950/40 text-orange-400"
+              onClick={() => onHold(job.job_id)}>
+              ⚠ Hold
             </button>
-          </div>
-        )}
+          )}
+          <button
+            className="btn-green flex-1 py-3 text-base"
+            onClick={() => onComplete(job.job_id)}>
+            ✓ Complete
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -629,9 +627,8 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
         <button className="btn-danger px-4 py-2.5 text-sm" onClick={onLogout}>✕ Done</button>
       </div>
 
-      {/* Job scan input — LM only */}
-      {isLM && (
-        <div className="bg-stone-900/60 border-b border-stone-800 px-4 py-3">
+      {/* Job scan input — all assembly users */}
+      <div className="bg-stone-900/60 border-b border-stone-800 px-4 py-3">
           <input
             ref={scanRef}
             type="text"
@@ -652,7 +649,6 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
             onInput={e => { bufRef.current = e.target.value }}
           />
         </div>
-      )}
 
       {error && (
         <div className="mx-4 mt-3 bg-red-900/40 border border-red-700 rounded-xl px-4 py-3 text-red-300 text-sm flex items-center justify-between">
@@ -668,9 +664,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
             <p className="text-5xl mb-4">🏭</p>
             <p className="text-stone-400 font-semibold text-lg">No active jobs</p>
             <p className="text-stone-600 text-sm mt-2">
-              {isLM
-                ? 'Scan a job barcode above to get started'
-                : 'Your Line Manager will add you to a job'}
+              Scan a job barcode above to get started
             </p>
           </div>
         )}
