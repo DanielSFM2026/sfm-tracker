@@ -493,10 +493,12 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
         const othersStillOn = job.team
           .filter(m => m.employee_id !== employee.employee_id)
           .some(m => isJobActive(m.events))
-        if (!othersStillOn) setJobStatusLocal(jobId, 'paused')
+        if (!othersStillOn) {
+          await setJobStatus(jobId, 'paused')
+          setJobStatusLocal(jobId, 'paused')
+        }
         if (isLM) {
           await onManagerLineEnd(employee.employee_id)
-          // Reload all jobs so remaining jobs show updated split_count
           loadMyAssemblyJobs(employee.employee_id).then(setJobs).catch(console.error)
         }
       } else {
@@ -535,7 +537,10 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
         const othersStillOn = job.team
           .filter(m => m.employee_id !== targetId)
           .some(m => isJobActive(m.events))
-        if (!othersStillOn) setJobStatusLocal(jobId, 'paused')
+        if (!othersStillOn) {
+          await setJobStatus(jobId, 'paused')
+          setJobStatusLocal(jobId, 'paused')
+        }
       } else {
         const ev = await addTeamMemberToJob(targetId, jobId, job.line_id)
         appendMemberEvent(jobId, targetId, ev)
