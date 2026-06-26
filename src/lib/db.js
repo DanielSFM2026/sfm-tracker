@@ -587,9 +587,8 @@ export async function prepareManagerLineStart(managerId, targetLineId) {
   const activeJobs = [...jobStates.values()].filter(
     r => r.event_type === 'START' || r.event_type === 'RESUME'
   )
-  const activeLines   = new Set(activeJobs.map(r => r.line_id))
-  const isNewLine     = !activeLines.has(targetLineId)
-  const newSplitCount = activeLines.size + (isNewLine ? 1 : 0)
+  // Count active jobs (not lines) — two jobs on the same line still splits 50/50
+  const newSplitCount = activeJobs.length + 1
 
   if (newSplitCount > 1 && activeJobs.length > 0) {
     const now = new Date().toISOString()
@@ -630,8 +629,8 @@ export async function onManagerLineEnd(managerId) {
   const activeJobs    = [...jobStates.values()].filter(
     r => r.event_type === 'START' || r.event_type === 'RESUME'
   )
-  const activeLines   = new Set(activeJobs.map(r => r.line_id))
-  const newSplitCount = Math.max(1, activeLines.size)
+  // Count remaining active jobs after the one that just ended
+  const newSplitCount = Math.max(1, activeJobs.length)
 
   if (activeJobs.length > 0) {
     const now = new Date().toISOString()
