@@ -323,32 +323,50 @@ export default function ManagerReport({ onBack }) {
               )
             })()}
 
-            {/* ── Assembly lines ────────────────────────────────────────── */}
+            {/* ── Assembly ─────────────────────────────────────────────── */}
             {(() => {
-              const asmLines = Object.entries(report.assembly)
-              if (asmLines.length === 0) {
-                return (
-                  <Section title="Assembly" badge="none active"
-                    badgeColour="bg-stone-700 text-stone-500" empty />
-                )
-              }
-              return asmLines
-                .sort(([a], [b]) => Number(a) - Number(b))
-                .map(([lineId, jobs]) => {
-                  const activeJobs = jobs.filter(j => j.isActive).length
-                  return (
-                    <Section
-                      key={lineId}
-                      title={lineMap[lineId] ?? `Line ${lineId}`}
-                      badge={activeJobs > 0 ? `${activeJobs} active` : 'on hold'}
-                      badgeColour={activeJobs > 0 ? 'bg-amber-500/20 text-amber-400' : 'bg-orange-900/40 text-orange-400'}
-                    >
-                      {jobs.map((entry, i) => (
-                        <AssemblyJobRow key={i} entry={entry} breakRules={breakRules} />
-                      ))}
-                    </Section>
-                  )
-                })
+              const asmLines = Object.entries(report.assembly).sort(([a], [b]) => Number(a) - Number(b))
+              const totalActive = asmLines.reduce((sum, [, jobs]) => sum + jobs.filter(j => j.isActive).length, 0)
+              return (
+                <div className="bg-stone-900 rounded-2xl border border-stone-700 overflow-hidden">
+                  {/* Assembly header */}
+                  <div className="flex items-center gap-3 px-4 py-3 border-b border-stone-700 bg-stone-800/60">
+                    <h2 className="text-sm font-bold uppercase tracking-widest text-stone-300">Assembly</h2>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                      totalActive > 0 ? 'bg-amber-500/20 text-amber-400' : 'bg-stone-700 text-stone-500'
+                    }`}>
+                      {totalActive > 0 ? `${totalActive} active` : 'none active'}
+                    </span>
+                  </div>
+                  {asmLines.length === 0 ? (
+                    <p className="text-stone-600 text-sm px-4 py-5 text-center">No active jobs</p>
+                  ) : (
+                    <div className="divide-y divide-stone-800">
+                      {asmLines.map(([lineId, jobs]) => {
+                        const activeJobs = jobs.filter(j => j.isActive).length
+                        return (
+                          <div key={lineId}>
+                            {/* Line sub-header */}
+                            <div className="flex items-center gap-3 px-4 py-2 bg-stone-800/30">
+                              <span className="text-xs font-semibold text-sky-400 uppercase tracking-wider">
+                                {lineMap[lineId] ?? `Line ${lineId}`}
+                              </span>
+                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                activeJobs > 0 ? 'bg-amber-500/20 text-amber-400' : 'bg-orange-900/40 text-orange-400'
+                              }`}>
+                                {activeJobs > 0 ? `${activeJobs} active` : 'on hold'}
+                              </span>
+                            </div>
+                            {jobs.map((entry, i) => (
+                              <AssemblyJobRow key={i} entry={entry} breakRules={breakRules} />
+                            ))}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
             })()}
           </>
         )}
