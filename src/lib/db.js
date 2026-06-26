@@ -281,6 +281,46 @@ export async function loadLineJobs(lineId, managerId) {
   return result
 }
 
+// ── Load jobs for a regular assembly worker (non-LM) ─────────────────────────
+// Returns all active/paused jobs this employee has been assigned to,
+// with their own events only (for their individual timer and clock on/off).
+
+export async function loadWorkerJobs(employeeId) {
+  const { data: rows, error } = await supabase
+    .from('job_events')
+    .select(`
+      event_id, job_id, employee_id, event_type, event_timestamp, line_id,
+      jobs ( job_id, po_number, part_number, quantity, status )
+    `)
+    .eq('employee_id', employeeId)
+    .in('event_type', ['START','RESUME','PAUSE','COMPLETE','AUTO_LOGOUT'])
+    .order('event_timestamp', { ascending: true })
+
+  if (error) throw error
+  if (!rows?.length) return []
+
+  const jobMap = new Map()
+  for (const row of rows) {
+    if (!row.jobs) continue
+    if (!['in_progress','paused'].includes(row.jobs.status)) continue
+    if (!jobMap.has(row.job_id)) {
+      jobMap.set(row.job_id, { ...row.jobs, line_id: row.line_id, events: [] })
+    }
+    jobMap.get(row.job_id).events.push({
+      event_id:        row.event_id,
+      event_type:      row.event_type,
+      event_timestamp: row.event_timestamp,
+      split_count:     1
+    })
+  }
+
+  // Only return jobs where this worker hasn't been permanently removed
+  return [...jobMap.values()].filter(job => {
+    const last = job.events[job.events.length - 1]
+    return last?.event_type !== 'COMPLETE'
+  })
+}
+
 // ── Add / remove a team member from a specific assembly job ───────────────────
 
 export async function addTeamMemberToJob(employeeId, jobId, lineId) {
