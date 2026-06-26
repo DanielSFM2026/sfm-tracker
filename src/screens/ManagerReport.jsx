@@ -249,6 +249,31 @@ export default function ManagerReport({ onBack }) {
 
         {report && !loading && (
           <>
+            {/* ── Kitting ──────────────────────────────────────────────── */}
+            {(() => {
+              const workers = report.individual.kitting ?? []
+              const active  = workers.filter(w => w.jobs.some(j => j.isActive)).length
+              return (
+                <Section
+                  title="Kitting"
+                  badge={active > 0 ? `${active} active` : 'none active'}
+                  badgeColour={active > 0 ? 'bg-sky-500/20 text-sky-400' : 'bg-stone-700 text-stone-500'}
+                  empty={workers.length === 0}
+                >
+                  {workers
+                    .sort((a, b) => {
+                      const aA = a.jobs.some(j => j.isActive) ? 0 : 1
+                      const bA = b.jobs.some(j => j.isActive) ? 0 : 1
+                      return aA - bA
+                    })
+                    .map(({ emp, jobs }) => (
+                      <WorkerRow key={emp.employee_id} emp={emp} jobs={jobs} breakRules={breakRules} />
+                    ))
+                  }
+                </Section>
+              )
+            })()}
+
             {/* ── Weld ─────────────────────────────────────────────────── */}
             {(() => {
               const workers = report.individual.weld ?? []
@@ -272,34 +297,6 @@ export default function ManagerReport({ onBack }) {
                   }
                 </Section>
               )
-            })()}
-
-            {/* ── Assembly ─────────────────────────────────────────────── */}
-            {(() => {
-              const asmLines = Object.entries(report.assembly)
-              if (asmLines.length === 0) {
-                return (
-                  <Section title="Assembly" badge="none active"
-                    badgeColour="bg-stone-700 text-stone-500" empty />
-                )
-              }
-              return asmLines
-                .sort(([a], [b]) => Number(a) - Number(b))
-                .map(([lineId, jobs]) => {
-                  const activeJobs = jobs.filter(j => j.isActive).length
-                  return (
-                    <Section
-                      key={lineId}
-                      title={lineMap[lineId] ?? `Line ${lineId}`}
-                      badge={activeJobs > 0 ? `${activeJobs} active` : 'on hold'}
-                      badgeColour={activeJobs > 0 ? 'bg-amber-500/20 text-amber-400' : 'bg-orange-900/40 text-orange-400'}
-                    >
-                      {jobs.map((entry, i) => (
-                        <AssemblyJobRow key={i} entry={entry} breakRules={breakRules} />
-                      ))}
-                    </Section>
-                  )
-                })
             })()}
 
             {/* ── Paint ────────────────────────────────────────────────── */}
@@ -326,29 +323,32 @@ export default function ManagerReport({ onBack }) {
               )
             })()}
 
-            {/* ── Cutting Shop ──────────────────────────────────────────── */}
+            {/* ── Assembly lines ────────────────────────────────────────── */}
             {(() => {
-              const workers = report.individual.kitting ?? []
-              const active  = workers.filter(w => w.jobs.some(j => j.isActive)).length
-              return (
-                <Section
-                  title="Cutting Shop"
-                  badge={active > 0 ? `${active} active` : 'none active'}
-                  badgeColour={active > 0 ? 'bg-sky-500/20 text-sky-400' : 'bg-stone-700 text-stone-500'}
-                  empty={workers.length === 0}
-                >
-                  {workers
-                    .sort((a, b) => {
-                      const aA = a.jobs.some(j => j.isActive) ? 0 : 1
-                      const bA = b.jobs.some(j => j.isActive) ? 0 : 1
-                      return aA - bA
-                    })
-                    .map(({ emp, jobs }) => (
-                      <WorkerRow key={emp.employee_id} emp={emp} jobs={jobs} breakRules={breakRules} />
-                    ))
-                  }
-                </Section>
-              )
+              const asmLines = Object.entries(report.assembly)
+              if (asmLines.length === 0) {
+                return (
+                  <Section title="Assembly" badge="none active"
+                    badgeColour="bg-stone-700 text-stone-500" empty />
+                )
+              }
+              return asmLines
+                .sort(([a], [b]) => Number(a) - Number(b))
+                .map(([lineId, jobs]) => {
+                  const activeJobs = jobs.filter(j => j.isActive).length
+                  return (
+                    <Section
+                      key={lineId}
+                      title={lineMap[lineId] ?? `Line ${lineId}`}
+                      badge={activeJobs > 0 ? `${activeJobs} active` : 'on hold'}
+                      badgeColour={activeJobs > 0 ? 'bg-amber-500/20 text-amber-400' : 'bg-orange-900/40 text-orange-400'}
+                    >
+                      {jobs.map((entry, i) => (
+                        <AssemblyJobRow key={i} entry={entry} breakRules={breakRules} />
+                      ))}
+                    </Section>
+                  )
+                })
             })()}
           </>
         )}
