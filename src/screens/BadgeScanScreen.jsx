@@ -90,10 +90,15 @@ export default function BadgeScanScreen({ onLogin, onManagerView }) {
 
   useEffect(() => {
     const el = inputRef.current
+    if (showPin) {
+      // PIN modal is open — keep input blurred so no keyboard appears
+      if (el) el.blur()
+      return
+    }
     if (el) el.focus()
 
     function refocus() {
-      if (!showPin && inputRef.current && document.activeElement !== inputRef.current) {
+      if (inputRef.current && document.activeElement !== inputRef.current) {
         inputRef.current.focus()
       }
     }
