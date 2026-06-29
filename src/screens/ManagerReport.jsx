@@ -876,25 +876,60 @@ export default function ManagerReport({ onBack }) {
             {(() => {
               const workers = report.individual.weld ?? []
               const active  = workers.filter(w => w.jobs.some(j => j.isActive)).length
+
+              // Group by tier — sub_department like "1 WELD/FAB", "2 WELD/FAB", "3 WELD/FAB"
+              const tierKey = sub => {
+                if (!sub) return '9_none'
+                const n = sub.trim().charAt(0)
+                return ['1','2','3'].includes(n) ? n : '9_none'
+              }
+              const TIER_LABEL = { '1': 'Tier 1', '2': 'Tier 2', '3': 'Tier 3', '9_none': 'Unassigned' }
+              const grouped = ['1','2','3','9_none'].map(key => ({
+                key,
+                label: TIER_LABEL[key],
+                workers: workers.filter(w => tierKey(w.emp.sub_department) === key)
+                  .sort((a, b) => {
+                    const aA = a.jobs.some(j => j.isActive) ? 0 : 1
+                    const bA = b.jobs.some(j => j.isActive) ? 0 : 1
+                    return aA - bA
+                  })
+              })).filter(g => g.workers.length > 0)
+
               return (
-                <Section
-                  title="Weld Shop"
-                  accent="border-t-blue-500"
-                  badge={active > 0 ? `${active} active` : 'none active'}
-                  badgeColour={active > 0 ? 'bg-blue-500/20 text-blue-400' : 'bg-stone-700 text-stone-500'}
-                  empty={workers.length === 0}
-                >
-                  {workers
-                    .sort((a, b) => {
-                      const aA = a.jobs.some(j => j.isActive) ? 0 : 1
-                      const bA = b.jobs.some(j => j.isActive) ? 0 : 1
-                      return aA - bA
-                    })
-                    .map(({ emp, jobs }) => (
-                      <WorkerRow key={emp.employee_id} emp={emp} jobs={jobs} breakRules={breakRules} onAction={setActionModal} />
-                    ))
-                  }
-                </Section>
+                <div className="bg-stone-900 rounded-2xl border border-stone-700 border-t-2 border-t-blue-500 overflow-hidden">
+                  <div className="flex items-center gap-3 px-4 py-3 border-b border-stone-700">
+                    <h2 className="text-sm font-bold uppercase tracking-widest text-stone-200">Weld Shop</h2>
+                    <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${
+                      active > 0 ? 'bg-blue-500/20 text-blue-400' : 'bg-stone-700 text-stone-500'
+                    }`}>
+                      {active > 0 ? `${active} active` : 'none active'}
+                    </span>
+                  </div>
+                  {workers.length === 0 ? (
+                    <p className="text-stone-600 text-sm px-4 py-5 text-center">No active jobs</p>
+                  ) : (
+                    <div>
+                      {grouped.map(({ key, label, workers: grpWorkers }) => {
+                        const grpActive = grpWorkers.filter(w => w.jobs.some(j => j.isActive)).length
+                        return (
+                          <div key={key} className="border-t border-stone-700/60">
+                            <div className="flex items-center gap-2.5 px-4 py-2 bg-blue-950/40">
+                              <span className="text-xs font-bold text-blue-300 uppercase tracking-widest">{label}</span>
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                                grpActive > 0 ? 'bg-blue-500/20 text-blue-400' : 'bg-stone-700/60 text-stone-500'
+                              }`}>
+                                {grpActive > 0 ? `${grpActive} active` : 'paused'}
+                              </span>
+                            </div>
+                            {grpWorkers.map(({ emp, jobs }) => (
+                              <WorkerRow key={emp.employee_id} emp={emp} jobs={jobs} breakRules={breakRules} onAction={setActionModal} />
+                            ))}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
               )
             })()}
 
