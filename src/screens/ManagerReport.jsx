@@ -159,7 +159,7 @@ function ManagerActionModal({ action, onClose, onDone }) {
 
   if (addWorkerOpen) {
     return (
-      <div className="fixed inset-0 bg-black/80 flex items-end sm:items-center justify-center z-50 px-4 pb-6 sm:pb-0">
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4">
         <div className="bg-stone-800 border border-stone-600 rounded-2xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto">
           <div className="mb-4">
             <p className="text-xs text-stone-500 uppercase tracking-widest mb-1">Add Worker</p>
@@ -223,7 +223,7 @@ function ManagerActionModal({ action, onClose, onDone }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-end sm:items-center justify-center z-50 px-4 pb-6 sm:pb-0">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4">
       <div className="bg-stone-800 border border-stone-600 rounded-2xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto">
 
         {/* Header */}
@@ -457,7 +457,7 @@ function AddJobModal({ onClose, onDone }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-end sm:items-center justify-center z-50 px-4 pb-6 sm:pb-0">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4">
       <div className="bg-stone-800 border border-stone-600 rounded-2xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto">
         <p className="text-xs text-stone-500 uppercase tracking-widest mb-4">Add Job</p>
         {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
