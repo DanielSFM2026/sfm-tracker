@@ -802,25 +802,12 @@ export default function ManagerReport({ onBack }) {
           >
             + Add Job
           </button>
-          <button
-            className="bg-stone-800 border border-stone-600 text-stone-300 px-4 py-2.5 rounded-xl text-sm"
-            onClick={refresh}
-          >
-            ↻ Refresh
-          </button>
           <button className="btn-danger px-4 py-2.5 text-sm" onClick={onBack}>
             ← Back
           </button>
         </div>
       </div>
 
-      {/* Auto-refresh banner */}
-      <div className="bg-stone-900/60 border-b border-stone-800 px-5 py-2 shrink-0">
-        <p className="text-xs text-stone-600 text-center">
-          Auto-refreshes every 30 seconds
-          {lastRefresh && ` · Last updated ${lastRefresh.toLocaleTimeString()}`}
-        </p>
-      </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-4 py-5 space-y-5">
