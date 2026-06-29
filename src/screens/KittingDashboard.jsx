@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { findOrCreateJob, setJobStatus, completeJob } from '../lib/db'
-import { parseJobBarcode } from '../lib/timeCalc'
+import { parseJobBarcode, formatDuration } from '../lib/timeCalc'
 import { supabase } from '../lib/supabase'
 
 const INACTIVITY_MS = 120_000
@@ -23,6 +23,13 @@ function ConfirmCompleteModal({ job, onConfirm, onCancel }) {
 }
 
 function KitCard({ job, onComplete }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
+  const elapsed = job.startedAt ? now - new Date(job.startedAt).getTime() : 0
+
   return (
     <div className="bg-stone-800 border border-stone-700 rounded-2xl p-5 flex items-center justify-between gap-4">
       <div className="min-w-0">
@@ -33,11 +40,18 @@ function KitCard({ job, onComplete }) {
           <p className="text-sm text-stone-500 mt-0.5">Qty: {job.quantity}</p>
         )}
       </div>
-      <button
-        onClick={() => onComplete(job)}
-        className="btn-green shrink-0 px-5 py-3 text-base">
-        ✓ Done
-      </button>
+      <div className="flex flex-col items-end gap-3 shrink-0">
+        {elapsed > 0 && (
+          <span className="text-amber-400 font-mono text-lg font-semibold tabular-nums">
+            {formatDuration(elapsed)}
+          </span>
+        )}
+        <button
+          onClick={() => onComplete(job)}
+          className="btn-green px-5 py-3 text-base">
+          ✓ Done
+        </button>
+      </div>
     </div>
   )
 }
@@ -72,7 +86,7 @@ export default function KittingDashboard({ employee, onLogout }) {
     async function load() {
       const { data } = await supabase
         .from('job_events')
-        .select('job_id, event_type, jobs(job_id, po_number, part_number, quantity, status)')
+        .select('job_id, event_type, event_timestamp, jobs(job_id, po_number, part_number, quantity, status)')
         .eq('employee_id', employee.employee_id)
         .eq('jobs.department', 'kitting')
         .in('event_type', ['START', 'COMPLETE'])
@@ -82,11 +96,16 @@ export default function KittingDashboard({ employee, onLogout }) {
       const seen = new Map()
       for (const row of data) {
         if (!row.jobs) continue
-        seen.set(row.job_id, { job: row.jobs, lastEvent: row.event_type })
+        const prev = seen.get(row.job_id)
+        seen.set(row.job_id, {
+          job: row.jobs,
+          lastEvent: row.event_type,
+          startedAt: prev?.startedAt ?? (row.event_type === 'START' ? row.event_timestamp : null),
+        })
       }
       setJobs([...seen.values()]
         .filter(({ lastEvent }) => lastEvent !== 'COMPLETE')
-        .map(({ job }) => job)
+        .map(({ job, startedAt }) => ({ ...job, startedAt }))
       )
     }
     load().catch(console.error)
@@ -117,7 +136,7 @@ export default function KittingDashboard({ employee, onLogout }) {
         event_timestamp: new Date().toISOString(),
       })
       await setJobStatus(job.job_id, 'in_progress')
-      setJobs(prev => [...prev, job])
+      setJobs(prev => [...prev, { ...job, startedAt: new Date().toISOString() }])
     } catch (err) {
       console.error(err)
       setError('Failed to look up job — check connection.')
