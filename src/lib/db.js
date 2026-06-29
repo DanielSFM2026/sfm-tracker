@@ -1,5 +1,20 @@
 import { supabase } from './supabase'
 
+// ── Job alerts (assembly) ────────────────────────────────────────────────────
+export async function sendJobAlert({ jobId, employeeId, lineId, poNumber, partNumber, message, employeeName, lineName }) {
+  // Store in DB
+  await supabase.from('job_alerts').insert({
+    job_id: jobId, employee_id: employeeId, line_id: lineId,
+    po_number: poNumber, part_number: partNumber, message,
+  })
+
+  // Send email via Supabase Edge Function (avoids CORS issues with direct Resend calls)
+  const { error } = await supabase.functions.invoke('send-alert', {
+    body: { poNumber, partNumber, message, employeeName, lineName },
+  })
+  if (error) throw error
+}
+
 // ── Break rules ─────────────────────────────────────────────────────────────
 
 export async function fetchBreakRules() {
@@ -14,7 +29,7 @@ export async function findEmployee(badgeCode) {
   const { data, error } = await supabase
     .from('employees')
     .select('*')
-    .eq('badge_code', badgeCode)
+    .eq('badge_code', badgeCode.toUpperCase())
     .eq('active', true)
     .maybeSingle()
   if (error) throw error
@@ -398,10 +413,8 @@ export async function loadMyAssemblyJobs(employeeId) {
     const myLast = myEntry.events[myEntry.events.length - 1]
     if (myLast?.event_type === 'COMPLETE') continue
 
-    jobFields.team = [...empData.values()].filter(m => {
-      const last = m.events[m.events.length - 1]
-      return last?.event_type !== 'COMPLETE'
-    })
+    // Keep ALL members including COMPLETE so the time sum matches the manager report
+    jobFields.team = [...empData.values()]
     result.push(jobFields)
   }
   return result
@@ -462,8 +475,13 @@ export async function managerResumeAssemblyJob(jobId, lineId, memberIds) {
 
 // ── Add / remove a team member from a specific assembly job ───────────────────
 
-export async function addTeamMemberToJob(employeeId, jobId, lineId, splitCount = 1) {
-  return insertEvent({ employee_id: employeeId, job_id: jobId, event_type: 'START', line_id: lineId, split_count: splitCount })
+export async function addTeamMemberToJob(employeeId, jobId, lineId, splitCount = 1, startTime) {
+  const event_timestamp = startTime ?? new Date().toISOString()
+  const { data, error } = await supabase.from('job_events')
+    .insert({ employee_id: employeeId, job_id: jobId, event_type: 'START', line_id: lineId, split_count: splitCount, event_timestamp })
+    .select().single()
+  if (error) throw error
+  return data
 }
 
 export async function removeTeamMemberFromJob(employeeId, jobId, lineId) {
@@ -607,16 +625,17 @@ export async function prepareManagerLineStart(managerId, targetLineId) {
   const newSplitCount = activeJobs.length + 1
 
   if (newSplitCount > 1 && activeJobs.length > 0) {
-    const now = new Date().toISOString()
+    const pauseTs  = new Date().toISOString()
+    const resumeTs = new Date(new Date(pauseTs).getTime() + 1).toISOString()
     for (const j of activeJobs) {
       await supabase.from('job_events').insert({
         employee_id: managerId, job_id: j.job_id, event_type: 'PAUSE',
-        line_id: j.line_id, event_timestamp: now
+        line_id: j.line_id, event_timestamp: pauseTs
       })
       await supabase.from('job_events').insert({
         employee_id: managerId, job_id: j.job_id, event_type: 'RESUME',
         line_id: j.line_id, activity_type: j.activity_type, work_type: j.work_type,
-        split_count: newSplitCount, event_timestamp: now
+        split_count: newSplitCount, event_timestamp: resumeTs
       })
     }
   }
@@ -649,21 +668,145 @@ export async function onManagerLineEnd(managerId) {
   const newSplitCount = Math.max(1, activeJobs.length)
 
   if (activeJobs.length > 0) {
-    const now = new Date().toISOString()
+    const pauseTs  = new Date().toISOString()
+    const resumeTs = new Date(new Date(pauseTs).getTime() + 1).toISOString()
     for (const j of activeJobs) {
       await supabase.from('job_events').insert({
         employee_id: managerId, job_id: j.job_id, event_type: 'PAUSE',
-        line_id: j.line_id, event_timestamp: now
+        line_id: j.line_id, event_timestamp: pauseTs
       })
       await supabase.from('job_events').insert({
         employee_id: managerId, job_id: j.job_id, event_type: 'RESUME',
         line_id: j.line_id, activity_type: j.activity_type, work_type: j.work_type,
-        split_count: newSplitCount, event_timestamp: now
+        split_count: newSplitCount, event_timestamp: resumeTs
       })
     }
   }
 
   return newSplitCount
+}
+
+// ── Rebalance split_count for all remaining active jobs of an employee ─────────
+// Used after manager pause/complete on a weld/paint/kitting worker so that
+// their remaining jobs go from e.g. split=2 → split=1 automatically.
+export async function rebalanceEmployeeSplit(employeeId) {
+  const { data: rows } = await supabase
+    .from('job_events')
+    .select('job_id, event_type, activity_type, work_type, line_id')
+    .eq('employee_id', employeeId)
+    .in('event_type', ['START','RESUME','PAUSE','COMPLETE'])
+    .order('event_timestamp', { ascending: true })
+  if (!rows?.length) return
+
+  const jobStates = new Map()
+  for (const row of rows) jobStates.set(row.job_id, row)
+
+  const activeJobs    = [...jobStates.values()].filter(r => r.event_type === 'START' || r.event_type === 'RESUME')
+  const newSplitCount = Math.max(1, activeJobs.length)
+
+  if (activeJobs.length > 0) {
+    const pauseTs  = new Date().toISOString()
+    const resumeTs = new Date(new Date(pauseTs).getTime() + 1).toISOString()
+    for (const j of activeJobs) {
+      await supabase.from('job_events').insert({
+        employee_id: employeeId, job_id: j.job_id, event_type: 'PAUSE',
+        line_id: j.line_id ?? null, event_timestamp: pauseTs
+      })
+      await supabase.from('job_events').insert({
+        employee_id: employeeId, job_id: j.job_id, event_type: 'RESUME',
+        line_id: j.line_id ?? null, activity_type: j.activity_type, work_type: j.work_type,
+        split_count: newSplitCount, event_timestamp: resumeTs
+      })
+    }
+  }
+}
+
+// ── Manager starts a full assembly job with a team, with optional backdated time ──
+// Creates START events for all selected members at the given timestamp.
+export async function managerStartAssemblyJobFull(jobId, lineId, memberIds, startTime) {
+  const ts = startTime ?? new Date().toISOString()
+  const splitCount = 1 // each member credited in full; LM split handled separately if needed
+  const { error } = await supabase.from('job_events').insert(
+    memberIds.map(empId => ({
+      employee_id: empId, job_id: jobId, event_type: 'START',
+      line_id: lineId, split_count: splitCount, event_timestamp: ts,
+    }))
+  )
+  if (error) throw error
+  await setJobStatus(jobId, 'in_progress')
+}
+
+// ── Fetch all active employees in a department ───────────────────────────────
+export async function fetchDepartmentEmployees(department) {
+  const { data, error } = await supabase
+    .from('employees')
+    .select('employee_id, full_name, department, sub_department')
+    .eq('department', department)
+    .eq('active', true)
+    .order('full_name', { ascending: true })
+  if (error) throw error
+  return data ?? []
+}
+
+// ── Manager clocks a worker onto an existing/new job ─────────────────────────
+// Pauses any currently active jobs first, then starts the new one at split=1.
+// startTime: ISO string — can be backdated by manager.
+export async function managerStartWorkerOnJob(employeeId, jobId, lineId, startTime) {
+  const { data: rows } = await supabase
+    .from('job_events')
+    .select('job_id, event_type, line_id')
+    .eq('employee_id', employeeId)
+    .in('event_type', ['START', 'RESUME', 'PAUSE', 'COMPLETE'])
+    .order('event_timestamp', { ascending: true })
+
+  // Find currently active jobs (excluding the target job)
+  const jobStates = new Map()
+  for (const row of rows ?? []) jobStates.set(row.job_id, row)
+  const activeOthers = [...jobStates.values()].filter(
+    r => r.job_id !== jobId && (r.event_type === 'START' || r.event_type === 'RESUME')
+  )
+
+  // Pause any active jobs before starting the new one
+  const pauseTs = new Date().toISOString()
+  for (const j of activeOthers) {
+    await supabase.from('job_events').insert({
+      employee_id: employeeId, job_id: j.job_id, event_type: 'PAUSE',
+      line_id: j.line_id ?? null, split_count: 1, event_timestamp: pauseTs,
+    })
+    await setJobStatus(j.job_id, 'paused')
+  }
+
+  // Start the new job at split=1 with the (possibly backdated) timestamp
+  const timestamp = startTime ?? new Date().toISOString()
+  const { error } = await supabase.from('job_events').insert({
+    employee_id: employeeId, job_id: jobId, event_type: 'START',
+    line_id: lineId ?? null, split_count: 1, event_timestamp: timestamp,
+  })
+  if (error) throw error
+  await setJobStatus(jobId, 'in_progress')
+}
+
+// ── Clock a single assembly team member off (PAUSE) or on (RESUME) ────────────
+// Recalculates job status afterwards. Called from manager report.
+export async function managerToggleAssemblyMember(employeeId, jobId, lineId, currentlyActive, allJobMembers) {
+  const now = new Date().toISOString()
+  if (currentlyActive) {
+    await supabase.from('job_events').insert({
+      employee_id: employeeId, job_id: jobId, event_type: 'PAUSE',
+      line_id: lineId, split_count: 1, event_timestamp: now
+    })
+    // If this was the last active member, pause the job
+    const othersActive = allJobMembers.some(m =>
+      m.employee_id !== employeeId && (m.lastEvent === 'START' || m.lastEvent === 'RESUME')
+    )
+    if (!othersActive) await setJobStatus(jobId, 'paused')
+  } else {
+    await supabase.from('job_events').insert({
+      employee_id: employeeId, job_id: jobId, event_type: 'RESUME',
+      line_id: lineId, split_count: 1, event_timestamp: now
+    })
+    await setJobStatus(jobId, 'in_progress')
+  }
 }
 
 // ── Manager live report ───────────────────────────────────────────────────────
