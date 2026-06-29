@@ -641,10 +641,8 @@ function WorkerRow({ emp, jobs, breakRules, onAction }) {
                 <span className="ml-2 text-xs text-purple-400 font-normal">{subLabel}</span>
               )}
             </p>
-            <p className="text-stone-400 text-sm">
-              PO {job.po_number}</p>
-            <p className="text-stone-500 text-xs break-all">
-              {job.part_number}
+            <p className="text-stone-400 text-sm truncate">
+              PO {job.po_number} &nbsp;·&nbsp; {job.part_number}
               {job.holdReason && (
                 <span className="ml-2 text-orange-400 text-xs">
                   ⏸ {HOLD_SHORT[job.holdReason] ?? job.holdReason}
@@ -695,8 +693,9 @@ function AssemblyJobRow({ entry, breakRules, lineId, lineName, onAction }) {
       <div className="flex items-center gap-3">
         <Dot active={isActive} />
         <div className="flex-1 min-w-0">
-          <p className="text-stone-100 font-semibold">PO {job.po_number}</p>
-          <p className="text-stone-400 text-xs break-all">{job.part_number}</p>
+          <p className="text-stone-100 font-semibold truncate">
+            PO {job.po_number} &nbsp;·&nbsp; {job.part_number}
+          </p>
           <p className="text-stone-500 text-xs mt-0.5 truncate">
             {team.length === 0
               ? 'No team assigned'
