@@ -911,10 +911,10 @@ export async function loadManagerReport() {
     const anyHeld   = !anyActive && members.some(m => m.lastEvent === 'PAUSE')
     if (!anyActive && !anyHeld) continue
 
-    // Hold reason from the most recent PAUSE event across all members
+    // Hold reason only if the most recent PAUSE event (across all members) has one
     const lastPauseEv = members
       .flatMap(m => m.events)
-      .filter(e => e.event_type === 'PAUSE' && e.hold_reason)
+      .filter(e => e.event_type === 'PAUSE')
       .sort((a, b) => new Date(b.event_timestamp) - new Date(a.event_timestamp))[0]
 
     const activeTeam = members.filter(m => m.lastEvent === 'START' || m.lastEvent === 'RESUME')
