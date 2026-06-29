@@ -635,10 +635,10 @@ function LiveTimer({ events, breakRules, isActive }) {
 }
 
 // ── Status dot ────────────────────────────────────────────────────────────────
-function Dot({ active }) {
+function Dot({ active, onHold }) {
   return (
     <span className={`inline-block w-2.5 h-2.5 rounded-full shrink-0 ${
-      active ? 'bg-emerald-400' : 'bg-orange-500'
+      active ? 'bg-emerald-400' : onHold ? 'bg-red-500' : 'bg-orange-500'
     }`} />
   )
 }
@@ -710,7 +710,7 @@ function AssemblyJobRow({ entry, breakRules, lineId, lineName, onAction }) {
       className="border-b border-stone-700 last:border-0 px-4 py-3 cursor-pointer hover:bg-stone-800/50 active:bg-stone-700/40 transition-colors"
       onClick={() => onAction({ type: 'assembly', job, lineId, lineName, members, isActive, holdReason })}>
       <div className="flex items-center gap-3">
-        <Dot active={isActive} />
+        <Dot active={isActive} onHold={!isActive && !!holdReason} />
         <div className="flex-1 min-w-0">
           <p className="text-stone-100 font-semibold truncate">
             PO {job.po_number} &nbsp;·&nbsp; {job.part_number}
@@ -999,6 +999,7 @@ export default function ManagerReport({ onBack }) {
                     <div>
                       {asmLines.map(([lineId, jobs]) => {
                         const activeJobs = jobs.filter(j => j.isActive).length
+                        const onHoldJobs = jobs.filter(j => !j.isActive && !!j.holdReason).length
                         return (
                           <div key={lineId} className="border-t border-stone-700/60">
                             <div className="flex items-center gap-2.5 px-4 py-2 bg-emerald-950/40">
@@ -1006,9 +1007,13 @@ export default function ManagerReport({ onBack }) {
                                 {lineMap[lineId] ?? `Line ${lineId}`}
                               </span>
                               <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                                activeJobs > 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-orange-900/40 text-orange-400'
+                                activeJobs > 0 ? 'bg-emerald-500/20 text-emerald-400'
+                                : onHoldJobs > 0 ? 'bg-red-900/40 text-red-400'
+                                : 'bg-orange-900/40 text-orange-400'
                               }`}>
-                                {activeJobs > 0 ? `${activeJobs} active` : 'on hold'}
+                                {activeJobs > 0 ? `${activeJobs} active`
+                                : onHoldJobs > 0 ? 'on hold'
+                                : 'paused'}
                               </span>
                             </div>
                             {jobs.map((entry, i) => (
