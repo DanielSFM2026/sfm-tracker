@@ -853,9 +853,9 @@ export default function ManagerReport({ onBack }) {
               return (
                 <Section
                   title="Kitting"
-                  accent="border-teal-500"
+                  accent="border-orange-400"
                   badge={active > 0 ? `${active} active` : 'none active'}
-                  badgeColour={active > 0 ? 'bg-teal-500/20 text-teal-400' : 'bg-stone-700 text-stone-500'}
+                  badgeColour={active > 0 ? 'bg-orange-500/20 text-orange-400' : 'bg-stone-700 text-stone-500'}
                   empty={workers.length === 0}
                 >
                   {workers
@@ -879,9 +879,9 @@ export default function ManagerReport({ onBack }) {
               return (
                 <Section
                   title="Weld Shop"
-                  accent="border-amber-500"
+                  accent="border-blue-500"
                   badge={active > 0 ? `${active} active` : 'none active'}
-                  badgeColour={active > 0 ? 'bg-amber-500/20 text-amber-400' : 'bg-stone-700 text-stone-500'}
+                  badgeColour={active > 0 ? 'bg-blue-500/20 text-blue-400' : 'bg-stone-700 text-stone-500'}
                   empty={workers.length === 0}
                 >
                   {workers
@@ -911,11 +911,11 @@ export default function ManagerReport({ onBack }) {
               })).filter(g => g.workers.length > 0)
 
               return (
-                <div className="bg-stone-900 rounded-2xl border border-stone-700 border-t-2 border-t-purple-500 overflow-hidden">
+                <div className="bg-stone-900 rounded-2xl border border-stone-700 border-t-2 border-t-red-500 overflow-hidden">
                   <div className="flex items-center gap-3 px-4 py-3 border-b border-stone-700">
                     <h2 className="text-sm font-bold uppercase tracking-widest text-stone-200">Paint Shop</h2>
                     <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${
-                      active > 0 ? 'bg-purple-500/20 text-purple-400' : 'bg-stone-700 text-stone-500'
+                      active > 0 ? 'bg-red-500/20 text-red-400' : 'bg-stone-700 text-stone-500'
                     }`}>
                       {active > 0 ? `${active} active` : 'none active'}
                     </span>
@@ -928,10 +928,10 @@ export default function ManagerReport({ onBack }) {
                         const grpActive = grpWorkers.filter(w => w.jobs.some(j => j.isActive)).length
                         return (
                           <div key={sub} className="border-t border-stone-700/60">
-                            <div className="flex items-center gap-2.5 px-4 py-2 bg-purple-950/40">
-                              <span className="text-xs font-bold text-purple-300 uppercase tracking-widest">{label}</span>
+                            <div className="flex items-center gap-2.5 px-4 py-2 bg-red-950/30">
+                              <span className="text-xs font-bold text-red-300 uppercase tracking-widest">{label}</span>
                               <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                                grpActive > 0 ? 'bg-purple-500/20 text-purple-400' : 'bg-stone-700/60 text-stone-500'
+                                grpActive > 0 ? 'bg-red-500/20 text-red-400' : 'bg-stone-700/60 text-stone-500'
                               }`}>
                                 {grpActive > 0 ? `${grpActive} active` : 'paused'}
                               </span>
@@ -953,11 +953,11 @@ export default function ManagerReport({ onBack }) {
               const asmLines = Object.entries(report.assembly).sort(([a], [b]) => Number(a) - Number(b))
               const totalActive = asmLines.reduce((sum, [, jobs]) => sum + jobs.filter(j => j.isActive).length, 0)
               return (
-                <div className="bg-stone-900 rounded-2xl border border-stone-700 border-t-2 border-t-sky-500 overflow-hidden">
+                <div className="bg-stone-900 rounded-2xl border border-stone-700 border-t-2 border-t-emerald-500 overflow-hidden">
                   <div className="flex items-center gap-3 px-4 py-3 border-b border-stone-700">
                     <h2 className="text-sm font-bold uppercase tracking-widest text-stone-200">Assembly</h2>
                     <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${
-                      totalActive > 0 ? 'bg-sky-500/20 text-sky-400' : 'bg-stone-700 text-stone-500'
+                      totalActive > 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-stone-700 text-stone-500'
                     }`}>
                       {totalActive > 0 ? `${totalActive} active` : 'none active'}
                     </span>
@@ -970,12 +970,12 @@ export default function ManagerReport({ onBack }) {
                         const activeJobs = jobs.filter(j => j.isActive).length
                         return (
                           <div key={lineId} className="border-t border-stone-700/60">
-                            <div className="flex items-center gap-2.5 px-4 py-2 bg-sky-950/40">
-                              <span className="text-xs font-bold text-sky-300 uppercase tracking-widest">
+                            <div className="flex items-center gap-2.5 px-4 py-2 bg-emerald-950/40">
+                              <span className="text-xs font-bold text-emerald-300 uppercase tracking-widest">
                                 {lineMap[lineId] ?? `Line ${lineId}`}
                               </span>
                               <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                                activeJobs > 0 ? 'bg-sky-500/20 text-sky-400' : 'bg-orange-900/40 text-orange-400'
+                                activeJobs > 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-orange-900/40 text-orange-400'
                               }`}>
                                 {activeJobs > 0 ? `${activeJobs} active` : 'on hold'}
                               </span>
