@@ -35,6 +35,7 @@ export default function App() {
   }
 
   function handleLogout() {
+    document.activeElement?.blur()
     setEmployee(null)
     setInitialJobs([])
     setSplitMode(false)
