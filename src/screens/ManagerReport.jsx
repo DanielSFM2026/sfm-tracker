@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { loadManagerReport, fetchBreakRules, fetchAssemblyLines } from '../lib/db'
+import {
+  loadManagerReport, fetchBreakRules, fetchAssemblyLines,
+  pauseJob, resumeJob, completeJob,
+  holdAssemblyJob, managerResumeAssemblyJob, completeAssemblyJob
+} from '../lib/db'
 import { calcElapsed, formatDuration, isJobActive } from '../lib/timeCalc'
 
 const REFRESH_MS = 30_000
@@ -22,6 +26,157 @@ const HOLD_SHORT = {
   poor_quality_sfm:           'Poor Quality (SFM)',
   missing_parts_supply_chain: 'Missing Parts (Supply Chain)',
   poor_quality_supply_chain:  'Poor Quality (Supply Chain)',
+}
+
+const HOLD_REASONS = [
+  { key: 'missing_parts_sfm',          label: 'Missing Parts (SFM)' },
+  { key: 'poor_quality_sfm',           label: 'Poor Quality (SFM)' },
+  { key: 'missing_parts_supply_chain', label: 'Missing Parts (Supply Chain)' },
+  { key: 'poor_quality_supply_chain',  label: 'Poor Quality (Supply Chain)' },
+]
+
+// ── Manager action modal ──────────────────────────────────────────────────────
+function ManagerActionModal({ action, onClose, onDone }) {
+  const [holdStep, setHoldStep] = useState(false)
+  const [busy, setBusy]         = useState(false)
+  const [error, setError]       = useState('')
+
+  const { type, emp, job, lineId, members } = action
+
+  const isAssembly = type === 'assembly'
+  const isActive   = isAssembly ? action.isActive : job.isActive
+
+  async function run(fn) {
+    setBusy(true); setError('')
+    try { await fn(); onDone() }
+    catch (e) { console.error(e); setError('Action failed — check connection.') }
+    finally { setBusy(false) }
+  }
+
+  function handlePauseWorker() {
+    run(() => pauseJob(emp.employee_id, job.job_id))
+  }
+  function handleResumeWorker() {
+    run(() => resumeJob(emp.employee_id, job.job_id))
+  }
+  function handleCompleteWorker() {
+    run(() => completeJob(emp.employee_id, job.job_id))
+  }
+  function handleHoldAssembly(reason) {
+    const activeIds = members.filter(m => m.lastEvent === 'START' || m.lastEvent === 'RESUME').map(m => m.employee_id)
+    run(() => holdAssemblyJob(job.job_id, lineId, reason, activeIds))
+  }
+  function handleResumeAssembly() {
+    const pausedIds = members.filter(m => m.lastEvent === 'PAUSE').map(m => m.employee_id)
+    run(() => managerResumeAssemblyJob(job.job_id, lineId, pausedIds))
+  }
+  function handleCompleteAssembly() {
+    const activeIds = members.filter(m => m.lastEvent === 'START' || m.lastEvent === 'RESUME').map(m => m.employee_id)
+    run(() => completeAssemblyJob(job.job_id, lineId, activeIds))
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-end sm:items-center justify-center z-50 px-4 pb-6 sm:pb-0">
+      <div className="bg-stone-800 border border-stone-600 rounded-2xl w-full max-w-sm p-6">
+
+        {/* Header */}
+        <div className="mb-5">
+          <p className="text-xs text-stone-500 uppercase tracking-widest mb-1">
+            {isAssembly ? `Assembly · ${action.lineName}` : emp.full_name}
+          </p>
+          <p className="text-lg font-bold text-stone-100">PO {job.po_number}</p>
+          <p className="text-sm text-stone-400">{job.part_number}</p>
+          <span className={`inline-block mt-2 px-3 py-0.5 rounded-full text-xs font-semibold ${
+            isActive ? 'bg-amber-500/20 text-amber-400' : 'bg-orange-900/40 text-orange-400'
+          }`}>
+            {isActive ? 'Active' : 'Paused / On Hold'}
+          </span>
+        </div>
+
+        {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+
+        {/* Hold reason picker for assembly */}
+        {holdStep ? (
+          <>
+            <p className="text-stone-400 text-sm mb-3">Select hold reason:</p>
+            <div className="space-y-2 mb-4">
+              {HOLD_REASONS.map(r => (
+                <button key={r.key} disabled={busy}
+                  className="w-full text-left px-4 py-3 rounded-xl bg-stone-700 hover:bg-orange-900/40
+                             border border-stone-600 hover:border-orange-700 text-stone-200 text-sm"
+                  onClick={() => handleHoldAssembly(r.key)}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            <button className="w-full text-sm text-stone-500 underline" onClick={() => setHoldStep(false)}>Back</button>
+          </>
+        ) : (
+          <div className="space-y-2">
+            {isAssembly ? (
+              isActive ? (
+                <>
+                  <button disabled={busy}
+                    className="w-full py-3 rounded-xl border border-orange-700 bg-orange-950/40 text-orange-400 text-base"
+                    onClick={() => setHoldStep(true)}>
+                    ⚠ Hold Job
+                  </button>
+                  <button disabled={busy}
+                    className="w-full py-3 rounded-xl bg-emerald-700/30 border border-emerald-600 text-emerald-300 text-base"
+                    onClick={handleCompleteAssembly}>
+                    ✓ Complete Job
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button disabled={busy}
+                    className="w-full py-3 rounded-xl bg-amber-500/20 border border-amber-600 text-amber-300 text-base"
+                    onClick={handleResumeAssembly}>
+                    ▶ Resume Job
+                  </button>
+                  <button disabled={busy}
+                    className="w-full py-3 rounded-xl bg-emerald-700/30 border border-emerald-600 text-emerald-300 text-base"
+                    onClick={handleCompleteAssembly}>
+                    ✓ Complete Job
+                  </button>
+                </>
+              )
+            ) : (
+              isActive ? (
+                <>
+                  <button disabled={busy}
+                    className="w-full py-3 rounded-xl border border-orange-700 bg-orange-950/40 text-orange-400 text-base"
+                    onClick={handlePauseWorker}>
+                    ⏸ Pause Job
+                  </button>
+                  <button disabled={busy}
+                    className="w-full py-3 rounded-xl bg-emerald-700/30 border border-emerald-600 text-emerald-300 text-base"
+                    onClick={handleCompleteWorker}>
+                    ✓ Complete Job
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button disabled={busy}
+                    className="w-full py-3 rounded-xl bg-amber-500/20 border border-amber-600 text-amber-300 text-base"
+                    onClick={handleResumeWorker}>
+                    ▶ Resume Job
+                  </button>
+                  <button disabled={busy}
+                    className="w-full py-3 rounded-xl bg-emerald-700/30 border border-emerald-600 text-emerald-300 text-base"
+                    onClick={handleCompleteWorker}>
+                    ✓ Complete Job
+                  </button>
+                </>
+              )
+            )}
+            <button className="w-full mt-2 text-sm text-stone-500 underline pt-1" onClick={onClose}>Cancel</button>
+          </div>
+        )}
+        {busy && <p className="text-stone-500 text-xs text-center mt-3 animate-pulse">Working…</p>}
+      </div>
+    </div>
+  )
 }
 
 // ── Live timer cell ───────────────────────────────────────────────────────────
@@ -53,12 +208,14 @@ function Dot({ active }) {
 }
 
 // ── Individual dept row ───────────────────────────────────────────────────────
-function WorkerRow({ emp, jobs, breakRules }) {
+function WorkerRow({ emp, jobs, breakRules, onAction }) {
   const subLabel = SUB_DEPT_LABEL[emp.sub_department]
   return (
     <div className="border-b border-stone-800 last:border-0">
       {jobs.map((job, i) => (
-        <div key={job.job_id} className="flex items-center gap-3 px-4 py-3">
+        <div key={job.job_id}
+          className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-stone-800/50 active:bg-stone-700/40 transition-colors"
+          onClick={() => onAction({ type: 'worker', emp, job })}>
           <Dot active={job.isActive} />
           <div className="flex-1 min-w-0">
             <p className="text-stone-100 font-semibold truncate">
@@ -76,7 +233,10 @@ function WorkerRow({ emp, jobs, breakRules }) {
               )}
             </p>
           </div>
-          <LiveTimer events={job.events} breakRules={breakRules} isActive={job.isActive} />
+          <div className="flex items-center gap-2 shrink-0">
+            <LiveTimer events={job.events} breakRules={breakRules} isActive={job.isActive} />
+            <span className="text-stone-600 text-xs">›</span>
+          </div>
         </div>
       ))}
     </div>
@@ -107,10 +267,12 @@ function AssemblyTotalTimer({ members, breakRules, isActive }) {
 }
 
 // ── Assembly line job row ─────────────────────────────────────────────────────
-function AssemblyJobRow({ entry, breakRules }) {
+function AssemblyJobRow({ entry, breakRules, lineId, lineName, onAction }) {
   const { job, members, isActive, holdReason, team } = entry
   return (
-    <div className="border-b border-stone-800 last:border-0 px-4 py-3">
+    <div
+      className="border-b border-stone-800 last:border-0 px-4 py-3 cursor-pointer hover:bg-stone-800/50 active:bg-stone-700/40 transition-colors"
+      onClick={() => onAction({ type: 'assembly', job, lineId, lineName, members, isActive, holdReason })}>
       <div className="flex items-center gap-3">
         <Dot active={isActive} />
         <div className="flex-1 min-w-0">
@@ -129,7 +291,10 @@ function AssemblyJobRow({ entry, breakRules }) {
             </p>
           )}
         </div>
-        <AssemblyTotalTimer members={members} breakRules={breakRules} isActive={isActive} />
+        <div className="flex items-center gap-2 shrink-0">
+          <AssemblyTotalTimer members={members} breakRules={breakRules} isActive={isActive} />
+          <span className="text-stone-600 text-xs">›</span>
+        </div>
       </div>
     </div>
   )
@@ -162,6 +327,7 @@ export default function ManagerReport({ onBack }) {
   const [loading, setLoading]       = useState(true)
   const [lastRefresh, setLastRefresh] = useState(null)
   const [error, setError]           = useState('')
+  const [actionModal, setActionModal] = useState(null)
   const timerRef = useRef(null)
 
   async function refresh() {
@@ -267,7 +433,7 @@ export default function ManagerReport({ onBack }) {
                       return aA - bA
                     })
                     .map(({ emp, jobs }) => (
-                      <WorkerRow key={emp.employee_id} emp={emp} jobs={jobs} breakRules={breakRules} />
+                      <WorkerRow key={emp.employee_id} emp={emp} jobs={jobs} breakRules={breakRules} onAction={setActionModal} />
                     ))
                   }
                 </Section>
@@ -292,7 +458,7 @@ export default function ManagerReport({ onBack }) {
                       return aA - bA
                     })
                     .map(({ emp, jobs }) => (
-                      <WorkerRow key={emp.employee_id} emp={emp} jobs={jobs} breakRules={breakRules} />
+                      <WorkerRow key={emp.employee_id} emp={emp} jobs={jobs} breakRules={breakRules} onAction={setActionModal} />
                     ))
                   }
                 </Section>
@@ -338,7 +504,7 @@ export default function ManagerReport({ onBack }) {
                               )}
                             </div>
                             {grpWorkers.map(({ emp, jobs }) => (
-                              <WorkerRow key={emp.employee_id} emp={emp} jobs={jobs} breakRules={breakRules} />
+                              <WorkerRow key={emp.employee_id} emp={emp} jobs={jobs} breakRules={breakRules} onAction={setActionModal} />
                             ))}
                           </div>
                         )
@@ -384,7 +550,9 @@ export default function ManagerReport({ onBack }) {
                               </span>
                             </div>
                             {jobs.map((entry, i) => (
-                              <AssemblyJobRow key={i} entry={entry} breakRules={breakRules} />
+                              <AssemblyJobRow key={i} entry={entry} breakRules={breakRules}
+                                lineId={lineId} lineName={lineMap[lineId] ?? `Line ${lineId}`}
+                                onAction={setActionModal} />
                             ))}
                           </div>
                         )
@@ -397,6 +565,14 @@ export default function ManagerReport({ onBack }) {
           </>
         )}
       </div>
+
+      {actionModal && (
+        <ManagerActionModal
+          action={actionModal}
+          onClose={() => setActionModal(null)}
+          onDone={() => { setActionModal(null); refresh() }}
+        />
+      )}
     </div>
   )
 }

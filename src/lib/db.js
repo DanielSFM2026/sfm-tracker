@@ -446,6 +446,20 @@ export async function completeAssemblyJob(jobId, lineId, allActiveIds) {
   await setJobStatus(jobId, 'completed')
 }
 
+// ── Resume a paused/held assembly job — inserts RESUME for all given member IDs ─
+export async function managerResumeAssemblyJob(jobId, lineId, memberIds) {
+  if (memberIds.length) {
+    const now = new Date().toISOString()
+    const { error } = await supabase.from('job_events')
+      .insert(memberIds.map(empId => ({
+        employee_id: empId, job_id: jobId, event_type: 'RESUME',
+        line_id: lineId, split_count: 1, event_timestamp: now
+      })))
+    if (error) throw error
+  }
+  await setJobStatus(jobId, 'in_progress')
+}
+
 // ── Add / remove a team member from a specific assembly job ───────────────────
 
 export async function addTeamMemberToJob(employeeId, jobId, lineId, splitCount = 1) {
