@@ -883,7 +883,7 @@ export default function ManagerReport({ onBack }) {
                 const n = sub.trim().charAt(0)
                 return ['1','2','3'].includes(n) ? n : '9_none'
               }
-              const TIER_LABEL = { '1': 'Tier 1', '2': 'Tier 2', '3': 'Tier 3', '9_none': 'Unassigned' }
+              const TIER_LABEL = { '1': 'CAT 1', '2': 'CAT 2', '3': 'CAT 3', '9_none': 'Unassigned' }
               const grouped = ['1','2','3','9_none'].map(key => ({
                 key,
                 label: TIER_LABEL[key],
