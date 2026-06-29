@@ -737,13 +737,14 @@ function AssemblyJobRow({ entry, breakRules, lineId, lineName, onAction }) {
 }
 
 // ── Section card ──────────────────────────────────────────────────────────────
-function Section({ title, badge, badgeColour = 'bg-stone-700 text-stone-300', children, empty }) {
+// accent: Tailwind border-color class e.g. 'border-amber-500'
+function Section({ title, badge, badgeColour = 'bg-stone-700 text-stone-300', accent = 'border-stone-600', children, empty }) {
   return (
-    <div className="bg-stone-900 rounded-2xl border border-stone-700 overflow-hidden">
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-stone-700 bg-stone-800/60">
-        <h2 className="text-sm font-bold uppercase tracking-widest text-stone-300">{title}</h2>
+    <div className={`bg-stone-900 rounded-2xl border border-stone-700 overflow-hidden border-t-2 ${accent}`}>
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-stone-700">
+        <h2 className="text-sm font-bold uppercase tracking-widest text-stone-200">{title}</h2>
         {badge != null && (
-          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${badgeColour}`}>
+          <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${badgeColour}`}>
             {badge}
           </span>
         )}
@@ -852,8 +853,9 @@ export default function ManagerReport({ onBack }) {
               return (
                 <Section
                   title="Kitting"
+                  accent="border-teal-500"
                   badge={active > 0 ? `${active} active` : 'none active'}
-                  badgeColour={active > 0 ? 'bg-sky-500/20 text-sky-400' : 'bg-stone-700 text-stone-500'}
+                  badgeColour={active > 0 ? 'bg-teal-500/20 text-teal-400' : 'bg-stone-700 text-stone-500'}
                   empty={workers.length === 0}
                 >
                   {workers
@@ -877,6 +879,7 @@ export default function ManagerReport({ onBack }) {
               return (
                 <Section
                   title="Weld Shop"
+                  accent="border-amber-500"
                   badge={active > 0 ? `${active} active` : 'none active'}
                   badgeColour={active > 0 ? 'bg-amber-500/20 text-amber-400' : 'bg-stone-700 text-stone-500'}
                   empty={workers.length === 0}
@@ -908,10 +911,10 @@ export default function ManagerReport({ onBack }) {
               })).filter(g => g.workers.length > 0)
 
               return (
-                <div className="bg-stone-900 rounded-2xl border border-stone-700 overflow-hidden">
-                  <div className="flex items-center gap-3 px-4 py-3 border-b border-stone-700 bg-stone-800/60">
-                    <h2 className="text-sm font-bold uppercase tracking-widest text-stone-300">Paint Shop</h2>
-                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                <div className="bg-stone-900 rounded-2xl border border-stone-700 border-t-2 border-t-purple-500 overflow-hidden">
+                  <div className="flex items-center gap-3 px-4 py-3 border-b border-stone-700">
+                    <h2 className="text-sm font-bold uppercase tracking-widest text-stone-200">Paint Shop</h2>
+                    <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${
                       active > 0 ? 'bg-purple-500/20 text-purple-400' : 'bg-stone-700 text-stone-500'
                     }`}>
                       {active > 0 ? `${active} active` : 'none active'}
@@ -920,18 +923,18 @@ export default function ManagerReport({ onBack }) {
                   {workers.length === 0 ? (
                     <p className="text-stone-600 text-sm px-4 py-5 text-center">No active jobs</p>
                   ) : (
-                    <div className="divide-y divide-stone-700">
+                    <div>
                       {grouped.map(({ sub, label, workers: grpWorkers }) => {
                         const grpActive = grpWorkers.filter(w => w.jobs.some(j => j.isActive)).length
                         return (
-                          <div key={sub}>
-                            <div className="flex items-center gap-3 px-4 py-2.5 bg-stone-800/60 border-l-2 border-purple-600">
-                              <span className="text-xs font-bold text-purple-300 uppercase tracking-wider">{label}</span>
-                              {grpActive > 0 && (
-                                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-400">
-                                  {grpActive} active
-                                </span>
-                              )}
+                          <div key={sub} className="border-t border-stone-700/60">
+                            <div className="flex items-center gap-2.5 px-4 py-2 bg-purple-950/40">
+                              <span className="text-xs font-bold text-purple-300 uppercase tracking-widest">{label}</span>
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                                grpActive > 0 ? 'bg-purple-500/20 text-purple-400' : 'bg-stone-700/60 text-stone-500'
+                              }`}>
+                                {grpActive > 0 ? `${grpActive} active` : 'paused'}
+                              </span>
                             </div>
                             {grpWorkers.map(({ emp, jobs }) => (
                               <WorkerRow key={emp.employee_id} emp={emp} jobs={jobs} breakRules={breakRules} onAction={setActionModal} />
@@ -950,12 +953,11 @@ export default function ManagerReport({ onBack }) {
               const asmLines = Object.entries(report.assembly).sort(([a], [b]) => Number(a) - Number(b))
               const totalActive = asmLines.reduce((sum, [, jobs]) => sum + jobs.filter(j => j.isActive).length, 0)
               return (
-                <div className="bg-stone-900 rounded-2xl border border-stone-700 overflow-hidden">
-                  {/* Assembly header */}
-                  <div className="flex items-center gap-3 px-4 py-3 border-b border-stone-700 bg-stone-800/60">
-                    <h2 className="text-sm font-bold uppercase tracking-widest text-stone-300">Assembly</h2>
-                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                      totalActive > 0 ? 'bg-amber-500/20 text-amber-400' : 'bg-stone-700 text-stone-500'
+                <div className="bg-stone-900 rounded-2xl border border-stone-700 border-t-2 border-t-sky-500 overflow-hidden">
+                  <div className="flex items-center gap-3 px-4 py-3 border-b border-stone-700">
+                    <h2 className="text-sm font-bold uppercase tracking-widest text-stone-200">Assembly</h2>
+                    <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${
+                      totalActive > 0 ? 'bg-sky-500/20 text-sky-400' : 'bg-stone-700 text-stone-500'
                     }`}>
                       {totalActive > 0 ? `${totalActive} active` : 'none active'}
                     </span>
@@ -963,18 +965,17 @@ export default function ManagerReport({ onBack }) {
                   {asmLines.length === 0 ? (
                     <p className="text-stone-600 text-sm px-4 py-5 text-center">No active jobs</p>
                   ) : (
-                    <div className="divide-y divide-stone-700">
+                    <div>
                       {asmLines.map(([lineId, jobs]) => {
                         const activeJobs = jobs.filter(j => j.isActive).length
                         return (
-                          <div key={lineId}>
-                            {/* Line sub-header */}
-                            <div className="flex items-center gap-3 px-4 py-2.5 bg-stone-800/60 border-l-2 border-sky-600">
-                              <span className="text-xs font-bold text-sky-300 uppercase tracking-wider">
+                          <div key={lineId} className="border-t border-stone-700/60">
+                            <div className="flex items-center gap-2.5 px-4 py-2 bg-sky-950/40">
+                              <span className="text-xs font-bold text-sky-300 uppercase tracking-widest">
                                 {lineMap[lineId] ?? `Line ${lineId}`}
                               </span>
-                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                                activeJobs > 0 ? 'bg-amber-500/20 text-amber-400' : 'bg-orange-900/40 text-orange-400'
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                                activeJobs > 0 ? 'bg-sky-500/20 text-sky-400' : 'bg-orange-900/40 text-orange-400'
                               }`}>
                                 {activeJobs > 0 ? `${activeJobs} active` : 'on hold'}
                               </span>
