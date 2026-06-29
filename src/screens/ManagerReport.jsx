@@ -48,6 +48,7 @@ function ManagerActionModal({ action, onClose, onDone }) {
   const [busyMember, setBusyMember]     = useState(null)
   const [busyAdd, setBusyAdd]           = useState(null)
   const [error, setError]               = useState('')
+  const [localMembers, setLocalMembers] = useState(() => action.members ?? [])
 
   const { type, emp, job, lineId, members } = action
   const isAssembly = type === 'assembly'
@@ -140,13 +141,17 @@ function ManagerActionModal({ action, onClose, onDone }) {
     run(() => completeAssemblyJob(job.job_id, lineId, activeIds))
   }
 
-  // Assembly individual member toggle
+  // Assembly individual member toggle — keeps modal open, updates local state
   async function handleToggleMember(member) {
     setBusyMember(member.employee_id); setError('')
     try {
       const currentlyActive = member.lastEvent === 'START' || member.lastEvent === 'RESUME'
-      await managerToggleAssemblyMember(member.employee_id, job.job_id, lineId, currentlyActive, members)
-      onDone()
+      await managerToggleAssemblyMember(member.employee_id, job.job_id, lineId, currentlyActive, localMembers)
+      setLocalMembers(prev => prev.map(m =>
+        m.employee_id === member.employee_id
+          ? { ...m, lastEvent: currentlyActive ? 'PAUSE' : 'RESUME' }
+          : m
+      ))
     } catch (e) {
       console.error(e); setError('Action failed — check connection.')
     } finally {
@@ -154,7 +159,7 @@ function ManagerActionModal({ action, onClose, onDone }) {
     }
   }
 
-  const visibleMembers = members?.filter(m => m.lastEvent !== 'COMPLETE') ?? []
+  const visibleMembers = localMembers.filter(m => m.lastEvent !== 'COMPLETE')
   const availableToAdd = (allEmployees ?? []).filter(e => !existingIds.has(e.employee_id))
 
   if (addWorkerOpen) {
@@ -349,7 +354,7 @@ function ManagerActionModal({ action, onClose, onDone }) {
                 + Add Team Member
               </button>
             )}
-            <button className="w-full mt-2 text-sm text-stone-500 underline pt-1" onClick={onClose}>Cancel</button>
+            <button className="w-full mt-2 text-sm text-stone-500 underline pt-1" onClick={onDone}>Close</button>
           </div>
         )}
         {busy && <p className="text-stone-500 text-xs text-center mt-3 animate-pulse">Working…</p>}
