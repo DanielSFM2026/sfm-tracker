@@ -6,7 +6,7 @@ import {
   fetchDepartmentEmployees, managerStartWorkerOnJob, managerStartAssemblyJobFull,
   findOrCreateJob, addTeamMemberToJob,
 } from '../lib/db'
-import { calcElapsed, formatDuration, isJobActive } from '../lib/timeCalc'
+import { calcElapsed, formatDuration, isJobActive, parseJobBarcode } from '../lib/timeCalc'
 
 const REFRESH_MS = 30_000
 
@@ -569,6 +569,20 @@ function AddJobModal({ onClose, onDone }) {
                 Line: <strong className="text-stone-200">{lineName}</strong> · {selectedIds.size} member{selectedIds.size !== 1 ? 's' : ''} selected
               </p>
             )}
+
+            <label className="block text-xs text-stone-500 uppercase tracking-widest mb-1">Scan Barcode</label>
+            <input
+              type="text"
+              placeholder="▌ Scan or paste barcode (PO/PART)"
+              autoComplete="off" autoCorrect="off" spellCheck={false}
+              className="w-full bg-stone-900 border-2 border-stone-600 rounded-xl px-4 py-3 text-stone-100 text-sm mb-4 focus:outline-none focus:border-amber-500 placeholder-stone-600"
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  const parsed = parseJobBarcode(e.target.value)
+                  if (parsed) { setPoNumber(parsed.poNumber); setPartNumber(parsed.partNumber); e.target.value = '' }
+                }
+              }}
+            />
 
             <label className="block text-xs text-stone-500 uppercase tracking-widest mb-1">PO Number</label>
             <input type="text" value={poNumber} onChange={e => setPoNumber(e.target.value)}
