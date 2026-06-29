@@ -853,7 +853,7 @@ export default function ManagerReport({ onBack }) {
               return (
                 <Section
                   title="Kitting"
-                  accent="border-orange-400"
+                  accent="border-t-orange-400"
                   badge={active > 0 ? `${active} active` : 'none active'}
                   badgeColour={active > 0 ? 'bg-orange-500/20 text-orange-400' : 'bg-stone-700 text-stone-500'}
                   empty={workers.length === 0}
@@ -879,7 +879,7 @@ export default function ManagerReport({ onBack }) {
               return (
                 <Section
                   title="Weld Shop"
-                  accent="border-blue-500"
+                  accent="border-t-blue-500"
                   badge={active > 0 ? `${active} active` : 'none active'}
                   badgeColour={active > 0 ? 'bg-blue-500/20 text-blue-400' : 'bg-stone-700 text-stone-500'}
                   empty={workers.length === 0}
