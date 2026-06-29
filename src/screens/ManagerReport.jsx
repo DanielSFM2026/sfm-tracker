@@ -878,16 +878,12 @@ export default function ManagerReport({ onBack }) {
               const active  = workers.filter(w => w.jobs.some(j => j.isActive)).length
 
               // Group by tier — sub_department like "1 WELD/FAB", "2 WELD/FAB", "3 WELD/FAB"
-              const tierKey = sub => {
-                if (!sub) return '9_none'
-                const n = sub.trim().charAt(0)
-                return ['1','2','3'].includes(n) ? n : '9_none'
-              }
-              const TIER_LABEL = { '1': 'CAT 1', '2': 'CAT 2', '3': 'CAT 3', '9_none': 'Unassigned' }
-              const grouped = ['1','2','3','9_none'].map(key => ({
+              const tierKey = sub => ['cat1','cat2','cat3'].includes(sub) ? sub : 'none'
+              const TIER_LABEL = { cat1: 'CAT 1', cat2: 'CAT 2', cat3: 'CAT 3', none: 'Unassigned' }
+              const grouped = ['cat1','cat2','cat3','none'].map(key => ({
                 key,
                 label: TIER_LABEL[key],
-                workers: workers.filter(w => tierKey(w.emp.sub_department) === key)
+                workers: workers.filter(w => tierKey(w.emp.sub_department ?? '') === key)
                   .sort((a, b) => {
                     const aA = a.jobs.some(j => j.isActive) ? 0 : 1
                     const bA = b.jobs.some(j => j.isActive) ? 0 : 1
