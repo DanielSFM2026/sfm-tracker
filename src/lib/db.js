@@ -481,11 +481,14 @@ export async function addTeamMemberToJob(employeeId, jobId, lineId, splitCount =
     .insert({ employee_id: employeeId, job_id: jobId, event_type: 'START', line_id: lineId, split_count: splitCount, event_timestamp })
     .select().single()
   if (error) throw error
+  await rebalanceEmployeeSplit(employeeId)
   return data
 }
 
 export async function removeTeamMemberFromJob(employeeId, jobId, lineId) {
-  return insertEvent({ employee_id: employeeId, job_id: jobId, event_type: 'PAUSE', line_id: lineId, split_count: 1 })
+  const result = await insertEvent({ employee_id: employeeId, job_id: jobId, event_type: 'PAUSE', line_id: lineId, split_count: 1 })
+  await rebalanceEmployeeSplit(employeeId)
+  return result
 }
 
 // Permanently remove a team member from a job (COMPLETE for that person only).
@@ -725,15 +728,16 @@ export async function rebalanceEmployeeSplit(employeeId) {
 // Creates START events for all selected members at the given timestamp.
 export async function managerStartAssemblyJobFull(jobId, lineId, memberIds, startTime) {
   const ts = startTime ?? new Date().toISOString()
-  const splitCount = 1 // each member credited in full; LM split handled separately if needed
   const { error } = await supabase.from('job_events').insert(
     memberIds.map(empId => ({
       employee_id: empId, job_id: jobId, event_type: 'START',
-      line_id: lineId, split_count: splitCount, event_timestamp: ts,
+      line_id: lineId, split_count: 1, event_timestamp: ts,
     }))
   )
   if (error) throw error
   await setJobStatus(jobId, 'in_progress')
+  // Rebalance each member in case they're already active on another job
+  for (const empId of memberIds) await rebalanceEmployeeSplit(empId)
 }
 
 // ── Fetch all active employees in a department ───────────────────────────────
@@ -795,7 +799,6 @@ export async function managerToggleAssemblyMember(employeeId, jobId, lineId, cur
       employee_id: employeeId, job_id: jobId, event_type: 'PAUSE',
       line_id: lineId, split_count: 1, event_timestamp: now
     })
-    // If this was the last active member, pause the job
     const othersActive = allJobMembers.some(m =>
       m.employee_id !== employeeId && (m.lastEvent === 'START' || m.lastEvent === 'RESUME')
     )
@@ -807,6 +810,8 @@ export async function managerToggleAssemblyMember(employeeId, jobId, lineId, cur
     })
     await setJobStatus(jobId, 'in_progress')
   }
+  // Rebalance so Ivan's time is split evenly across all his active assembly jobs
+  await rebalanceEmployeeSplit(employeeId)
 }
 
 // ── Manager live report ───────────────────────────────────────────────────────
