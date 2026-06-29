@@ -657,7 +657,7 @@ function WorkerRow({ emp, jobs, breakRules, onAction }) {
             <p className="text-stone-100 font-semibold">
               {i === 0 ? emp.full_name : ''}
               {i === 0 && subLabel && (
-                <span className="ml-2 text-xs text-purple-400 font-normal">{subLabel}</span>
+                <span className="ml-2 text-xs text-red-400 font-normal">{subLabel}</span>
               )}
             </p>
             <p className="text-stone-400 text-sm truncate">
