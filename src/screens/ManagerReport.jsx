@@ -4,7 +4,7 @@ import {
   pauseJob, resumeJob, completeJob, rebalanceEmployeeSplit,
   holdAssemblyJob, managerResumeAssemblyJob, completeAssemblyJob, managerToggleAssemblyMember,
   fetchDepartmentEmployees, managerStartWorkerOnJob, managerStartAssemblyJobFull,
-  findOrCreateJob, addTeamMemberToJob,
+  findOrCreateJob, addTeamMemberToJob, employeeHasCompletedJob,
 } from '../lib/db'
 import { calcElapsed, formatDuration, isJobActive, parseJobBarcode } from '../lib/timeCalc'
 
@@ -397,6 +397,8 @@ function AddJobModal({ onClose, onDone }) {
   const [startTime, setStartTime]   = useState(nowLocal)
   const [busy, setBusy]             = useState(false)
   const [error, setError]           = useState('')
+  const [warning, setWarning]       = useState('')  // non-blocking warning requiring confirmation
+  const [confirmed, setConfirmed]   = useState(false)
 
   // weld / kitting / paint
   const [target, setTarget] = useState(null)
@@ -435,9 +437,18 @@ function AddJobModal({ onClose, onDone }) {
   // ── Confirm: weld / kitting / paint ──────────────────────────────────────
   async function handleConfirmSingle() {
     if (!poNumber.trim() || !partNumber.trim()) { setError('PO number and part number are required.'); return }
-    setBusy(true); setError('')
+    setBusy(true); setError(''); setWarning('')
     try {
-      const { job } = await findOrCreateJob(poNumber.trim().toUpperCase(), partNumber.trim().toUpperCase(), dept)
+      const { job, created } = await findOrCreateJob(poNumber.trim().toUpperCase(), partNumber.trim().toUpperCase(), dept)
+      if (!created && !confirmed) {
+        const alreadyDone = await employeeHasCompletedJob(target.employee_id, job.job_id)
+        if (alreadyDone) {
+          setWarning(`${target.full_name} has already completed this job. Their previous time will be kept. Press Confirm again to proceed.`)
+          setConfirmed(true)
+          setBusy(false)
+          return
+        }
+      }
       const ts = localInputToISO(startTime)
       await managerStartWorkerOnJob(target.employee_id, job.job_id, null, ts)
       onDone()
@@ -450,9 +461,15 @@ function AddJobModal({ onClose, onDone }) {
   async function handleConfirmAssembly() {
     if (!poNumber.trim() || !partNumber.trim()) { setError('PO number and part number are required.'); return }
     if (selectedIds.size === 0) { setError('Select at least one team member.'); return }
-    setBusy(true); setError('')
+    setBusy(true); setError(''); setWarning('')
     try {
-      const { job } = await findOrCreateJob(poNumber.trim().toUpperCase(), partNumber.trim().toUpperCase(), 'assembly')
+      const { job, created } = await findOrCreateJob(poNumber.trim().toUpperCase(), partNumber.trim().toUpperCase(), 'assembly')
+      if (!created && !confirmed) {
+        setWarning(`This job already exists in the system. Previous time will be kept. Press Confirm again to proceed.`)
+        setConfirmed(true)
+        setBusy(false)
+        return
+      }
       const ts = localInputToISO(startTime)
       await managerStartAssemblyJobFull(job.job_id, lineId, [...selectedIds], ts)
       onDone()
@@ -599,10 +616,15 @@ function AddJobModal({ onClose, onDone }) {
             <input type="datetime-local" value={startTime} onChange={e => setStartTime(e.target.value)}
               className="w-full bg-stone-700 border border-stone-600 rounded-xl px-4 py-3 text-stone-100 text-sm mb-5 focus:outline-none focus:border-amber-500" />
 
+            {warning && (
+              <div className="bg-amber-900/40 border border-amber-600 rounded-xl px-4 py-3 text-amber-300 text-sm mb-3">
+                ⚠ {warning}
+              </div>
+            )}
             <button disabled={busy}
               onClick={step === 'details' ? handleConfirmSingle : handleConfirmAssembly}
               className="w-full py-3 rounded-xl bg-emerald-700/30 border border-emerald-600 text-emerald-300 text-base mb-2">
-              {busy ? 'Starting…' : step === 'details' ? `Clock In ${target?.full_name}` : `Start Job · ${selectedIds.size} on team`}
+              {busy ? 'Starting…' : confirmed ? 'Confirm' : step === 'details' ? `Clock In ${target?.full_name}` : `Start Job · ${selectedIds.size} on team`}
             </button>
             <button className="w-full text-sm text-stone-500 underline"
               onClick={() => setStep(step === 'details' ? 'employee' : 'asm_team')}>
