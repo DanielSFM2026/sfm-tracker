@@ -17,11 +17,14 @@ function getIntervals(events, asOf = new Date()) {
     if (ev.event_type === 'START' || ev.event_type === 'RESUME') {
       openStart      = new Date(ev.event_timestamp)
       openSplitCount = ev.split_count ?? 1
-    } else if (
-      ev.event_type === 'PAUSE' ||
-      ev.event_type === 'COMPLETE' ||
-      ev.event_type === 'AUTO_LOGOUT'
-    ) {
+    } else if (ev.event_type === 'COMPLETE') {
+      if (openStart) {
+        intervals.push({ start: openStart, end: new Date(ev.event_timestamp), splitCount: openSplitCount })
+        openStart = null
+      }
+      // Reset — time after a fresh re-start counts from zero
+      intervals.length = 0
+    } else if (ev.event_type === 'PAUSE' || ev.event_type === 'AUTO_LOGOUT') {
       if (openStart) {
         intervals.push({ start: openStart, end: new Date(ev.event_timestamp), splitCount: openSplitCount })
         openStart = null

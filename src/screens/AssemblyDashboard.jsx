@@ -193,8 +193,10 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePerm
       setError('Could not look up badge — check connection.')
     } finally {
       setScanning(false)
-      if (inputRef.current) { inputRef.current.value = ''; inputRef.current.focus() }
       bufferRef.current = ''
+      setTimeout(() => {
+        if (inputRef.current) { inputRef.current.value = ''; inputRef.current.focus() }
+      }, 50)
     }
   }
 
