@@ -469,10 +469,6 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
     if (!appBreakRules?.length) fetchBreakRules().then(setBreakRules).catch(console.error)
   }, [employee.employee_id])
 
-  // Refocus scan input when modal closes (LM only)
-  useEffect(() => {
-    if (!modal && scanRef.current) scanRef.current.focus()
-  }, [modal])
 
   // ── State helpers ────────────────────────────────────────────────────────────
   function appendMemberEvent(jobId, employeeId, ev) {
@@ -711,7 +707,6 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
           <input
             ref={scanRef}
             type="text"
-            inputMode="none"
             placeholder={scanning ? 'Looking up job…' : '▌ Scan job barcode to start'}
             disabled={scanning}
             autoComplete="off" autoCorrect="off" spellCheck={false}

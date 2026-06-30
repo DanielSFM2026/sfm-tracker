@@ -112,7 +112,6 @@ export default function KittingDashboard({ employee, onLogout }) {
   }, [employee.employee_id])
 
   useEffect(() => {
-    if (!modal && scanRef.current) scanRef.current.focus()
   }, [modal])
 
   async function handleScan(raw) {
@@ -180,7 +179,6 @@ export default function KittingDashboard({ employee, onLogout }) {
           <input
             ref={scanRef}
             type="text"
-            inputMode="none"
             className="w-full bg-stone-900 border-2 border-stone-600 focus:border-amber-500
                        rounded-xl px-4 py-3 text-stone-100 text-lg outline-none
                        transition-colors placeholder-stone-600"
