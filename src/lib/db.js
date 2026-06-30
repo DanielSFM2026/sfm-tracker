@@ -105,7 +105,7 @@ export async function findOrCreateJob(poNumber, partNumber, department = 'weld')
     .eq('part_number', partNumber)
     .eq('department', department)
     .maybeSingle()
-  if (existing) return { job: existing, created: false }
+  if (existing && existing.status !== 'complete') return { job: existing, created: false }
 
   const { data, error } = await supabase
     .from('jobs')
