@@ -163,6 +163,7 @@ export default function BadgeScanScreen({ onLogin, onManagerView }) {
         ref={inputRef}
         className="scan-input"
         type="text"
+        inputMode="none"
         autoComplete="off"
         autoCorrect="off"
         spellCheck={false}
