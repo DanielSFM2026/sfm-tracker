@@ -1,9 +1,35 @@
-import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { findOrCreateJob, setJobStatus, completeJob } from '../lib/db'
 import { parseJobBarcode, formatDuration } from '../lib/timeCalc'
 import { supabase } from '../lib/supabase'
 
 const INACTIVITY_MS = 120_000
+
+function ManualScanModal({ onSubmit, onCancel }) {
+  const [val, setVal] = useState('')
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-6">
+      <div className="bg-stone-800 border border-stone-600 rounded-2xl p-8 w-full max-w-sm">
+        <h2 className="text-xl font-bold text-stone-100 mb-1 text-center">Enter Job Barcode</h2>
+        <p className="text-stone-500 text-sm text-center mb-5">Format: PO/PART</p>
+        <input
+          autoFocus
+          type="text"
+          className="w-full bg-stone-900 border-2 border-stone-600 focus:border-amber-500
+                     rounded-xl px-4 py-3 text-stone-100 text-lg outline-none mb-4"
+          placeholder="e.g. 1234/AB-56"
+          value={val}
+          onChange={e => setVal(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && val.trim()) onSubmit(val.trim()) }}
+        />
+        <div className="flex gap-3">
+          <button className="btn-ghost flex-1" onClick={onCancel}>Cancel</button>
+          <button className="btn-primary flex-1" onClick={() => val.trim() && onSubmit(val.trim())}>Go</button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function ConfirmCompleteModal({ job, onConfirm, onCancel }) {
   return (
@@ -61,6 +87,7 @@ export default function KittingDashboard({ employee, onLogout }) {
   const [modal, setModal]   = useState(null)
   const [error, setError]   = useState('')
   const [scanning, setScanning] = useState(false)
+  const [showManual, setShowManual] = useState(false)
 
   const scanRef   = useRef(null)
   const bufRef    = useRef('')
@@ -111,8 +138,8 @@ export default function KittingDashboard({ employee, onLogout }) {
     load().catch(console.error)
   }, [employee.employee_id])
 
-  useEffect(() => {
-  }, [modal])
+  useEffect(() => { scanRef.current?.focus() }, [])
+  useEffect(() => { if (!modal) scanRef.current?.focus() }, [modal])
 
   async function handleScan(raw) {
     const parsed = parseJobBarcode(raw)
@@ -172,9 +199,12 @@ export default function KittingDashboard({ employee, onLogout }) {
 
       {/* Scan input */}
       <div className="bg-stone-800 border-b border-stone-700 px-5 py-4 shrink-0">
-        <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">
-          Scan barcode to add kit
-        </p>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs text-stone-500 uppercase tracking-widest">Scan barcode to add kit</p>
+          <button onClick={() => setShowManual(true)} className="text-xs text-stone-500 hover:text-stone-300 underline">
+            ⌨ Type manually
+          </button>
+        </div>
         <div className="relative">
           <input
             ref={scanRef}
@@ -183,6 +213,7 @@ export default function KittingDashboard({ employee, onLogout }) {
                        rounded-xl px-4 py-3 text-stone-100 text-lg outline-none
                        transition-colors placeholder-stone-600"
             placeholder={scanning ? 'Looking up…' : '▌ Ready to scan'}
+            inputMode="none"
             autoComplete="off"
             autoCorrect="off"
             spellCheck={false}
@@ -219,6 +250,12 @@ export default function KittingDashboard({ employee, onLogout }) {
         )}
       </div>
 
+      {showManual && (
+        <ManualScanModal
+          onSubmit={v => { setShowManual(false); handleScan(v) }}
+          onCancel={() => setShowManual(false)}
+        />
+      )}
       {modal && (
         <ConfirmCompleteModal
           job={modal.job}

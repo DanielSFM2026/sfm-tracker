@@ -12,6 +12,33 @@ import JobCard from '../components/JobCard'
 
 const INACTIVITY_TIMEOUT_MS = 75_000
 
+// ── Manual barcode entry modal ────────────────────────────────────────────────
+function ManualScanModal({ onSubmit, onCancel }) {
+  const [val, setVal] = useState('')
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-6">
+      <div className="bg-stone-800 border border-stone-600 rounded-2xl p-8 w-full max-w-sm">
+        <h2 className="text-xl font-bold text-stone-100 mb-1 text-center">Enter Job Barcode</h2>
+        <p className="text-stone-500 text-sm text-center mb-5">Format: PO/PART</p>
+        <input
+          autoFocus
+          type="text"
+          className="w-full bg-stone-900 border-2 border-stone-600 focus:border-amber-500
+                     rounded-xl px-4 py-3 text-stone-100 text-lg outline-none mb-4"
+          placeholder="e.g. 1234/AB-56"
+          value={val}
+          onChange={e => setVal(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && val.trim()) onSubmit(val.trim()) }}
+        />
+        <div className="flex gap-3">
+          <button className="btn-ghost flex-1" onClick={onCancel}>Cancel</button>
+          <button className="btn-primary flex-1" onClick={() => val.trim() && onSubmit(val.trim())}>Go</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Two-step action modal (Activity → Work type) ─────────────────────────────
 function JobActionModal({ onConfirm, onCancel }) {
   const [step, setStep]             = useState(1)
@@ -84,6 +111,7 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
   const [error, setError]         = useState('')
   const [scanning, setScanning]   = useState(false)
   const [modal, setModal]         = useState(null)
+  const [showManual, setShowManual] = useState(false)
 
   const scanInputRef  = useRef(null)
   const bufferRef     = useRef('')
@@ -94,6 +122,9 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
 
   const activeJobIdsRef = useRef(activeJobIds)
   useEffect(() => { activeJobIdsRef.current = activeJobIds }, [jobs])
+
+  useEffect(() => { scanInputRef.current?.focus() }, [])
+  useEffect(() => { if (!modal) scanInputRef.current?.focus() }, [modal])
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -381,13 +412,17 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
 
       {/* Scan input */}
       <div className="bg-stone-800 border-b border-stone-700 px-5 py-4 shrink-0">
-        <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">
-          Scan a job barcode to start or add a job
-        </p>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs text-stone-500 uppercase tracking-widest">Scan a job barcode</p>
+          <button onClick={() => setShowManual(true)} className="text-xs text-stone-500 hover:text-stone-300 underline">
+            ⌨ Type manually
+          </button>
+        </div>
         <div className="relative">
           <input
             ref={scanInputRef}
             type="text"
+            inputMode="none"
             className="w-full bg-stone-900 border-2 border-stone-600 focus:border-amber-500
                        rounded-xl px-4 py-3 text-stone-100 text-lg outline-none
                        transition-colors placeholder-stone-600"
@@ -398,7 +433,6 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
             onKeyDown={handleKeyDown}
             onInput={handleInput}
             readOnly={scanning}
-            style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
           />
           {scanning && (
             <span className="absolute right-4 top-1/2 -translate-y-1/2 text-amber-400 animate-pulse">…</span>
@@ -431,6 +465,14 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
           ))
         )}
       </div>
+
+      {/* Manual entry modal */}
+      {showManual && (
+        <ManualScanModal
+          onSubmit={v => { setShowManual(false); handleJobScan(v) }}
+          onCancel={() => setShowManual(false)}
+        />
+      )}
 
       {/* Modals */}
       {modal?.type === 'already_complete' && (

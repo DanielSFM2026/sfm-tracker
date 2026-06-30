@@ -80,36 +80,57 @@ function PinModal({ onSuccess, onCancel }) {
   )
 }
 
+// ── Manual badge ID modal ─────────────────────────────────────────────────────
+function ManualBadgeModal({ onSubmit, onCancel }) {
+  const [val, setVal] = useState('')
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-6">
+      <div className="bg-stone-800 border border-stone-600 rounded-2xl p-8 w-full max-w-sm">
+        <h2 className="text-xl font-bold text-stone-100 mb-4 text-center">Enter Badge ID</h2>
+        <input
+          autoFocus
+          type="text"
+          className="w-full bg-stone-900 border-2 border-stone-600 focus:border-amber-500
+                     rounded-xl px-4 py-3 text-stone-100 text-lg outline-none mb-4"
+          placeholder="Badge ID…"
+          value={val}
+          onChange={e => setVal(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && val.trim()) onSubmit(val.trim()) }}
+        />
+        <div className="flex gap-3">
+          <button className="btn-ghost flex-1" onClick={onCancel}>Cancel</button>
+          <button className="btn-primary flex-1" onClick={() => val.trim() && onSubmit(val.trim())}>
+            Go
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Badge scan screen ─────────────────────────────────────────────────────────
 export default function BadgeScanScreen({ onLogin, onManagerView }) {
   const inputRef  = useRef(null)
   const bufferRef = useRef('')
-  const [error, setError]     = useState('')
-  const [loading, setLoading] = useState(false)
-  const [showPin, setShowPin] = useState(false)
+  const [error, setError]       = useState('')
+  const [loading, setLoading]   = useState(false)
+  const [showPin, setShowPin]   = useState(false)
+  const [showManual, setShowManual] = useState(false)
 
+  // Keep hidden input focused for scanner — inputMode="none" prevents soft keyboard
   useEffect(() => {
-    const el = inputRef.current
-    if (showPin) {
-      // PIN modal is open — keep input blurred so no keyboard appears
-      if (el) el.blur()
-      return
-    }
-    if (el) el.focus()
-
+    if (showPin || showManual) return
+    inputRef.current?.focus()
     function refocus() {
-      if (inputRef.current && document.activeElement !== inputRef.current) {
-        inputRef.current.focus()
-      }
+      if (!showPin && !showManual) inputRef.current?.focus()
     }
-
     document.addEventListener('click', refocus)
     document.addEventListener('touchend', refocus)
     return () => {
       document.removeEventListener('click', refocus)
       document.removeEventListener('touchend', refocus)
     }
-  }, [showPin])
+  }, [showPin, showManual])
 
   async function handleScan(badgeCode) {
     if (loading || !badgeCode.trim()) return
@@ -163,6 +184,7 @@ export default function BadgeScanScreen({ onLogin, onManagerView }) {
         ref={inputRef}
         className="scan-input"
         type="text"
+        inputMode="none"
         autoComplete="off"
         autoCorrect="off"
         spellCheck={false}
@@ -193,13 +215,20 @@ export default function BadgeScanScreen({ onLogin, onManagerView }) {
         )}
       </div>
 
-      <button
-        onTouchStart={() => inputRef.current?.blur()}
-        onClick={() => setShowPin(true)}
-        className="text-stone-600 hover:text-stone-400 text-sm underline transition-colors"
-      >
-        📊 Manager View
-      </button>
+      <div className="flex gap-6">
+        <button
+          onClick={() => setShowManual(true)}
+          className="text-stone-600 hover:text-stone-400 text-sm underline transition-colors"
+        >
+          ⌨ Type badge ID
+        </button>
+        <button
+          onClick={() => setShowPin(true)}
+          className="text-stone-600 hover:text-stone-400 text-sm underline transition-colors"
+        >
+          📊 Manager View
+        </button>
+      </div>
 
       {error && (
         <div className="bg-red-900/60 border border-red-600 rounded-xl px-6 py-4 text-center max-w-sm w-full">
@@ -214,6 +243,12 @@ export default function BadgeScanScreen({ onLogin, onManagerView }) {
         <PinModal
           onSuccess={() => { setShowPin(false); onManagerView() }}
           onCancel={() => setShowPin(false)}
+        />
+      )}
+      {showManual && (
+        <ManualBadgeModal
+          onSubmit={id => { setShowManual(false); handleScan(id) }}
+          onCancel={() => setShowManual(false)}
         />
       )}
     </div>

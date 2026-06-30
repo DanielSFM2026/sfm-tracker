@@ -237,6 +237,7 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePerm
           ref={inputRef}
           placeholder={scanning ? 'Looking up…' : '▌ Scan badge to add / toggle'}
           disabled={scanning}
+          inputMode="none"
           className="w-full bg-stone-700 border border-stone-600 rounded-xl px-4 py-3
                      text-stone-100 text-base outline-none placeholder-stone-500 mb-4"
           autoComplete="off" autoCorrect="off" spellCheck={false}
@@ -461,6 +462,8 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
       evts.forEach(e => window.removeEventListener(e, resetInactivity))
     }
   }, [resetInactivity])
+
+  useEffect(() => { if (!modal && isLM) scanRef.current?.focus() }, [modal])
 
   // Load jobs + lines
   useEffect(() => {
@@ -707,6 +710,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
           <input
             ref={scanRef}
             type="text"
+            inputMode="none"
             placeholder={scanning ? 'Looking up job…' : '▌ Scan job barcode to start'}
             disabled={scanning}
             autoComplete="off" autoCorrect="off" spellCheck={false}
