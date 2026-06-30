@@ -4,7 +4,8 @@ import {
   startNewJob,
   pauseJob,
   resumeJob,
-  completeJob
+  completeJob,
+  employeeHasCompletedJob,
 } from '../lib/db'
 import { isJobActive, parseJobBarcode } from '../lib/timeCalc'
 import JobCard from '../components/JobCard'
@@ -163,6 +164,16 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
     try {
       const { job, created } = await findOrCreateJob(parsed.poNumber, parsed.partNumber)
       const existing = jobs.find(j => j.job_id === job.job_id)
+
+      // Warn if this employee has already completed this job
+      if (!created && !existing) {
+        const alreadyDone = await employeeHasCompletedJob(employee.employee_id, job.job_id)
+        if (alreadyDone) {
+          setModal({ type: 'already_complete', job })
+          return
+        }
+      }
+
       setModal({
         type:       'job_action',
         action:     existing ? 'resume' : 'start',
@@ -425,6 +436,24 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
       </div>
 
       {/* Modals */}
+      {modal?.type === 'already_complete' && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4">
+          <div className="bg-stone-800 border border-stone-600 rounded-2xl p-6 w-full max-w-sm text-center">
+            <p className="text-2xl mb-3">⚠️</p>
+            <h2 className="text-lg font-bold text-stone-100 mb-2">Already Completed</h2>
+            <p className="text-stone-400 text-sm mb-1">PO <strong className="text-stone-200">{modal.job.po_number}</strong></p>
+            <p className="text-stone-400 text-sm mb-5">Part <strong className="text-stone-200">{modal.job.part_number}</strong></p>
+            <p className="text-stone-400 text-sm mb-6">You've already completed this job. Do you want to continue working on it? Your previous time will be kept.</p>
+            <div className="flex gap-3">
+              <button className="flex-1 btn-secondary py-3" onClick={() => setModal(null)}>Cancel</button>
+              <button className="flex-1 btn-green py-3" onClick={() => {
+                const { job } = modal
+                setModal({ type: 'job_action', action: 'start', jobId: job.job_id, wasCreated: false, job })
+              }}>Continue</button>
+            </div>
+          </div>
+        </div>
+      )}
       {modal?.type === 'job_action' && (
         <JobActionModal
           onConfirm={handleActionConfirm}

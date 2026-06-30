@@ -500,9 +500,14 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
     const part = raw.slice(idx + 1).trim()
     setScanning(true); setError('')
     try {
-      const { job } = await findOrCreateJob(po, part, 'assembly')
+      const { job, created } = await findOrCreateJob(po, part, 'assembly')
       if (jobs.find(j => j.job_id === job.job_id)) {
         setError(`PO ${po} / ${part} is already on your list.`)
+        return
+      }
+      // Job already exists in DB — confirm before joining
+      if (!created) {
+        setModal({ type: 'job_exists_confirm', job })
         return
       }
       setModal({ type: 'line_pick', job })
@@ -763,6 +768,21 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
       </div>
 
       {/* Modals */}
+      {modal?.type === 'job_exists_confirm' && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4">
+          <div className="bg-stone-800 border border-stone-600 rounded-2xl p-6 w-full max-w-sm text-center">
+            <p className="text-2xl mb-3">⚠️</p>
+            <h2 className="text-lg font-bold text-stone-100 mb-2">Job Already Exists</h2>
+            <p className="text-stone-400 text-sm mb-1">PO <strong className="text-stone-200">{modal.job.po_number}</strong></p>
+            <p className="text-stone-400 text-sm mb-5">Part <strong className="text-stone-200">{modal.job.part_number}</strong></p>
+            <p className="text-stone-400 text-sm mb-6">This job is already in the system. Do you want to continue working on it?</p>
+            <div className="flex gap-3">
+              <button className="flex-1 btn-secondary py-3" onClick={() => setModal(null)}>Cancel</button>
+              <button className="flex-1 btn-green py-3" onClick={() => setModal({ type: 'line_pick', job: modal.job })}>Continue</button>
+            </div>
+          </div>
+        </div>
+      )}
       {modal?.type === 'line_pick' && (
         <LinePickerModal
           lines={lines}

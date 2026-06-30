@@ -105,7 +105,7 @@ export async function findOrCreateJob(poNumber, partNumber, department = 'weld')
     .eq('part_number', partNumber)
     .eq('department', department)
     .maybeSingle()
-  if (existing && existing.status !== 'complete') return { job: existing, created: false }
+  if (existing) return { job: existing, created: false }
 
   const { data, error } = await supabase
     .from('jobs')
@@ -114,6 +114,18 @@ export async function findOrCreateJob(poNumber, partNumber, department = 'weld')
     .single()
   if (error) throw error
   return { job: data, created: true }
+}
+
+// Returns true if this employee has a COMPLETE event on the given job
+export async function employeeHasCompletedJob(employeeId, jobId) {
+  const { data } = await supabase
+    .from('job_events')
+    .select('event_id')
+    .eq('employee_id', employeeId)
+    .eq('job_id', jobId)
+    .eq('event_type', 'COMPLETE')
+    .limit(1)
+  return (data?.length ?? 0) > 0
 }
 
 // ── Update jobs.status cache ──────────────────────────────────────────────────
