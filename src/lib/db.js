@@ -1198,3 +1198,68 @@ export async function completePaintBatchStage(batchId, stage, memberIds, batchJo
   const { error } = await supabase.from('paint_batches').update(update).eq('batch_id', batchId)
   if (error) throw error
 }
+
+// ── Job history ───────────────────────────────────────────────────────────────
+
+// Load completed job events with employee and job info, optionally filtered by date range
+export async function loadJobHistory({ fromDate, toDate, department } = {}) {
+  let q = supabase
+    .from('job_events')
+    .select('event_id, event_type, event_timestamp, split_count, employee_id, job_id, batch_id, employees(full_name, department, sub_department), jobs(job_id, po_number, part_number, quantity, department)')
+    .in('event_type', ['START', 'PAUSE', 'RESUME', 'COMPLETE'])
+    .order('event_timestamp', { ascending: false })
+
+  if (fromDate) q = q.gte('event_timestamp', fromDate)
+  if (toDate)   q = q.lte('event_timestamp', toDate)
+  if (department) q = q.eq('jobs.department', department)
+
+  const { data, error } = await q.limit(2000)
+  if (error) throw error
+
+  // Group all events by job_id+employee_id pair
+  const pairs = new Map()
+  for (const ev of data ?? []) {
+    if (!ev.jobs) continue
+    const dept = ev.jobs.department
+    if (department && dept !== department) continue
+    const key = `${ev.job_id}__${ev.employee_id}`
+    if (!pairs.has(key)) {
+      pairs.set(key, {
+        job_id: ev.job_id,
+        employee_id: ev.employee_id,
+        po_number: ev.jobs.po_number,
+        part_number: ev.jobs.part_number,
+        quantity: ev.jobs.quantity,
+        department: dept,
+        sub_department: ev.employees?.sub_department,
+        full_name: ev.employees?.full_name,
+        events: [],
+        batch_id: ev.batch_id,
+      })
+    }
+    pairs.get(key).events.push(ev)
+  }
+
+  return [...pairs.values()]
+}
+
+// Load full event list for a specific job+employee pair (for the edit modal)
+export async function loadJobEvents(jobId, employeeId) {
+  const { data, error } = await supabase
+    .from('job_events')
+    .select('event_id, event_type, event_timestamp, split_count')
+    .eq('job_id', jobId)
+    .eq('employee_id', employeeId)
+    .order('event_timestamp', { ascending: true })
+  if (error) throw error
+  return data ?? []
+}
+
+// Update a single event's timestamp
+export async function updateEventTimestamp(eventId, newIsoTimestamp) {
+  const { error } = await supabase
+    .from('job_events')
+    .update({ event_timestamp: newIsoTimestamp })
+    .eq('event_id', eventId)
+  if (error) throw error
+}

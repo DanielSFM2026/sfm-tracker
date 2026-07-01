@@ -5,6 +5,7 @@ import {
   holdAssemblyJob, managerResumeAssemblyJob, completeAssemblyJob, managerToggleAssemblyMember,
   fetchDepartmentEmployees, managerStartWorkerOnJob, managerStartAssemblyJobFull,
   findOrCreateJob, addTeamMemberToJob, employeeHasCompletedJob,
+  loadJobHistory, loadJobEvents, updateEventTimestamp,
 } from '../lib/db'
 import { calcElapsed, formatDuration, isJobActive, parseJobBarcode } from '../lib/timeCalc'
 
@@ -778,8 +779,239 @@ function Section({ title, badge, badgeColour = 'bg-stone-700 text-stone-300', ac
   )
 }
 
+// ── Edit timestamps modal ─────────────────────────────────────────────────────
+function EditTimestampsModal({ record, onClose, onSaved }) {
+  const [events, setEvents]   = useState(null)
+  const [saving, setSaving]   = useState(null)   // eventId currently being saved
+  const [editVal, setEditVal] = useState({})     // eventId → local datetime string
+  const [error, setError]     = useState('')
+
+  useEffect(() => {
+    loadJobEvents(record.job_id, record.employee_id)
+      .then(evs => {
+        setEvents(evs)
+        const defaults = {}
+        for (const ev of evs) {
+          const d = new Date(ev.event_timestamp)
+          defaults[ev.event_id] = toLocalInput(d)
+        }
+        setEditVal(defaults)
+      })
+      .catch(() => setError('Could not load events.'))
+  }, [record.job_id, record.employee_id])
+
+  function toLocalInput(date) {
+    const y  = date.getFullYear()
+    const mo = String(date.getMonth() + 1).padStart(2, '0')
+    const d  = String(date.getDate()).padStart(2, '0')
+    const h  = String(date.getHours()).padStart(2, '0')
+    const mi = String(date.getMinutes()).padStart(2, '0')
+    return `${y}-${mo}-${d}T${h}:${mi}`
+  }
+
+  async function handleSave(eventId) {
+    const raw = editVal[eventId]
+    if (!raw) return
+    setSaving(eventId); setError('')
+    try {
+      await updateEventTimestamp(eventId, localInputToISO(raw))
+      // Refresh event list
+      const evs = await loadJobEvents(record.job_id, record.employee_id)
+      setEvents(evs)
+      onSaved()
+    } catch { setError('Failed to save — check connection.') }
+    finally { setSaving(null) }
+  }
+
+  const TYPE_COLOUR = { START: 'text-emerald-400', RESUME: 'text-emerald-400', PAUSE: 'text-orange-400', COMPLETE: 'text-blue-400', AUTO_LOGOUT: 'text-red-400' }
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-start justify-center z-50 overflow-y-auto py-6 px-4">
+      <div className="bg-stone-900 border border-stone-700 rounded-2xl w-full max-w-lg">
+        <div className="px-6 py-5 border-b border-stone-700">
+          <p className="text-xs text-stone-500 uppercase tracking-widest mb-1">{record.department} · {record.full_name}</p>
+          <p className="text-xl font-bold text-stone-100">PO {record.po_number}</p>
+          <p className="text-stone-400 text-sm">Part: {record.part_number}</p>
+        </div>
+
+        <div className="px-6 py-4 space-y-3">
+          {error && <p className="text-red-400 text-sm bg-red-900/20 rounded-xl px-4 py-3">{error}</p>}
+          {!events && !error && <p className="text-stone-500 animate-pulse text-sm text-center py-4">Loading events…</p>}
+          {events?.map(ev => (
+            <div key={ev.event_id} className="bg-stone-800 rounded-xl px-4 py-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className={`text-xs font-bold uppercase tracking-wide ${TYPE_COLOUR[ev.event_type] ?? 'text-stone-400'}`}>
+                  {ev.event_type}
+                </span>
+                {ev.split_count > 1 && (
+                  <span className="text-xs text-stone-600">÷{ev.split_count}</span>
+                )}
+              </div>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="datetime-local"
+                  value={editVal[ev.event_id] ?? ''}
+                  onChange={e => setEditVal(prev => ({ ...prev, [ev.event_id]: e.target.value }))}
+                  className="flex-1 bg-stone-700 border border-stone-600 focus:border-amber-500 rounded-lg px-3 py-2 text-stone-100 text-sm outline-none"
+                />
+                <button
+                  disabled={saving === ev.event_id}
+                  onClick={() => handleSave(ev.event_id)}
+                  className="bg-amber-600/30 border border-amber-600 text-amber-300 text-xs px-3 py-2 rounded-lg hover:bg-amber-600/50 transition-colors disabled:opacity-40"
+                >
+                  {saving === ev.event_id ? '…' : 'Save'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="px-6 pb-6">
+          <button className="btn-ghost w-full" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── History view ──────────────────────────────────────────────────────────────
+function HistoryView({ breakRules }) {
+  const today = new Date()
+  const fmt   = d => d.toISOString().slice(0, 10)
+
+  const [fromDate, setFromDate] = useState(fmt(new Date(today.getFullYear(), today.getMonth(), 1)))
+  const [toDate,   setToDate]   = useState(fmt(today))
+  const [dept,     setDept]     = useState('')
+  const [records,  setRecords]  = useState(null)
+  const [loading,  setLoading]  = useState(false)
+  const [error,    setError]    = useState('')
+  const [editing,  setEditing]  = useState(null)
+
+  const DEPT_OPTS = [
+    { value: '', label: 'All Departments' },
+    { value: 'weld',    label: 'Weld' },
+    { value: 'kitting', label: 'Kitting' },
+    { value: 'paint',   label: 'Paint' },
+    { value: 'assembly', label: 'Assembly' },
+  ]
+
+  async function search() {
+    setLoading(true); setError(''); setRecords(null)
+    try {
+      const fromISO = fromDate ? new Date(fromDate + 'T00:00:00').toISOString() : undefined
+      const toISO   = toDate   ? new Date(toDate   + 'T23:59:59').toISOString() : undefined
+      const data = await loadJobHistory({ fromDate: fromISO, toDate: toISO, department: dept || undefined })
+      // Only keep records that have a COMPLETE event
+      const completed = data.filter(r => r.events.some(e => e.event_type === 'COMPLETE'))
+      completed.sort((a, b) => {
+        const aEnd = Math.max(...a.events.map(e => new Date(e.event_timestamp)))
+        const bEnd = Math.max(...b.events.map(e => new Date(e.event_timestamp)))
+        return bEnd - aEnd
+      })
+      setRecords(completed)
+    } catch { setError('Failed to load history — check connection.') }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { search() }, [])
+
+  const DEPT_COLOUR = { weld: 'text-blue-400', kitting: 'text-orange-400', paint: 'text-red-400', assembly: 'text-emerald-400' }
+
+  return (
+    <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4">
+      {/* Filters */}
+      <div className="bg-stone-900 rounded-2xl border border-stone-700 p-4 space-y-3">
+        <p className="text-xs text-stone-500 uppercase tracking-widest">Filter</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-stone-600 block mb-1">From</label>
+            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+              className="w-full bg-stone-800 border border-stone-600 focus:border-amber-500 rounded-xl px-3 py-2.5 text-stone-100 text-sm outline-none" />
+          </div>
+          <div>
+            <label className="text-xs text-stone-600 block mb-1">To</label>
+            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+              className="w-full bg-stone-800 border border-stone-600 focus:border-amber-500 rounded-xl px-3 py-2.5 text-stone-100 text-sm outline-none" />
+          </div>
+        </div>
+        <div>
+          <label className="text-xs text-stone-600 block mb-1">Department</label>
+          <select value={dept} onChange={e => setDept(e.target.value)}
+            className="w-full bg-stone-800 border border-stone-600 focus:border-amber-500 rounded-xl px-3 py-2.5 text-stone-100 text-sm outline-none">
+            {DEPT_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+        <button onClick={search} disabled={loading}
+          className="w-full bg-amber-600/30 border border-amber-600 text-amber-300 py-3 rounded-xl text-sm font-semibold hover:bg-amber-600/50 transition-colors disabled:opacity-40">
+          {loading ? 'Searching…' : 'Search'}
+        </button>
+      </div>
+
+      {error && <p className="text-red-400 text-sm bg-red-900/20 rounded-xl px-4 py-3">{error}</p>}
+
+      {records !== null && (
+        <>
+          <p className="text-xs text-stone-600 px-1">{records.length} completed job{records.length !== 1 ? 's' : ''}</p>
+          {records.length === 0 && (
+            <div className="text-center py-16 text-stone-600">
+              <p className="text-4xl mb-4">📋</p>
+              <p>No completed jobs in this range</p>
+            </div>
+          )}
+          <div className="space-y-2">
+            {records.map(r => {
+              const elapsed = calcElapsed(r.events, breakRules)
+              const completeEv = r.events.slice().reverse().find(e => e.event_type === 'COMPLETE')
+              const completedAt = completeEv ? new Date(completeEv.event_timestamp) : null
+              return (
+                <div key={`${r.job_id}_${r.employee_id}`}
+                  className="bg-stone-900 border border-stone-700 rounded-2xl px-4 py-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-xs font-bold uppercase ${DEPT_COLOUR[r.department] ?? 'text-stone-400'}`}>
+                          {r.department}{r.sub_department ? ` · ${r.sub_department}` : ''}
+                        </span>
+                      </div>
+                      <p className="text-stone-100 font-semibold truncate">PO {r.po_number}</p>
+                      <p className="text-stone-500 text-xs">Part: {r.part_number}</p>
+                      <p className="text-stone-500 text-xs mt-0.5">{r.full_name}</p>
+                      {completedAt && (
+                        <p className="text-stone-600 text-xs mt-1">
+                          Completed {completedAt.toLocaleDateString()} {completedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      )}
+                    </div>
+                    <div className="shrink-0 text-right flex flex-col items-end gap-2">
+                      <p className="font-mono font-bold text-xl text-stone-300 tabular-nums">{formatDuration(elapsed)}</p>
+                      <button
+                        onClick={() => setEditing(r)}
+                        className="text-xs text-amber-500 underline hover:text-amber-300">
+                        Edit timestamps
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {editing && (
+        <EditTimestampsModal
+          record={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { search() }}
+        />
+      )}
+    </div>
+  )
+}
+
 // ── Main report screen ────────────────────────────────────────────────────────
 export default function ManagerReport({ onBack }) {
+  const [tab, setTab]               = useState('live')   // 'live' | 'history'
   const [report, setReport]         = useState(null)
   const [lines, setLines]           = useState([])
   const [breakRules, setBreakRules] = useState([])
@@ -829,30 +1061,48 @@ export default function ManagerReport({ onBack }) {
       {/* Header */}
       <div className="bg-stone-900 border-b border-stone-700 px-5 py-4 flex items-center justify-between shrink-0 gap-3">
         <div className="min-w-0">
-          <p className="text-xs text-stone-500 uppercase tracking-widest">Live Overview</p>
+          <p className="text-xs text-stone-500 uppercase tracking-widest">Manager View</p>
           <p className="text-xl font-bold text-stone-100">SFM Job Tracker</p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          {lastRefresh && (
+          {tab === 'live' && lastRefresh && (
             <p className="text-xs text-stone-600 hidden sm:block">
               Updated {lastRefresh.toLocaleTimeString()}
             </p>
           )}
-          <button
-            className="bg-emerald-800/40 border border-emerald-700 text-emerald-300 px-4 py-2.5 rounded-xl text-sm"
-            onClick={() => setShowAddJob(true)}
-          >
-            + Add Job
-          </button>
+          {tab === 'live' && (
+            <button
+              className="bg-emerald-800/40 border border-emerald-700 text-emerald-300 px-4 py-2.5 rounded-xl text-sm"
+              onClick={() => setShowAddJob(true)}
+            >
+              + Add Job
+            </button>
+          )}
           <button className="btn-danger px-4 py-2.5 text-sm" onClick={onBack}>
             ← Back
           </button>
         </div>
       </div>
 
+      {/* Tab bar */}
+      <div className="bg-stone-900 border-b border-stone-700 flex shrink-0">
+        {[['live', 'Live Overview'], ['history', 'History']].map(([key, label]) => (
+          <button key={key} onClick={() => setTab(key)}
+            className={`flex-1 py-3 text-sm font-semibold transition-colors ${
+              tab === key
+                ? 'text-amber-400 border-b-2 border-amber-400'
+                : 'text-stone-500 hover:text-stone-300'
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-4 py-5 space-y-5">
+      {/* History tab */}
+      {tab === 'history' && <HistoryView breakRules={breakRules} />}
+
+      {/* Live tab content */}
+      {tab === 'live' && <div className="flex-1 overflow-y-auto px-4 py-5 space-y-5">
 
         {loading && (
           <div className="text-center py-20 text-stone-600">
@@ -1053,7 +1303,7 @@ export default function ManagerReport({ onBack }) {
             })()}
           </>
         )}
-      </div>
+      </div>}
 
       {actionModal && (
         <ManagerActionModal
