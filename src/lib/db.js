@@ -1034,57 +1034,77 @@ export async function loadAvailablePoolJobs() {
   return data ?? []
 }
 
-// Prep creates a new booth batch by selecting jobs from the pool
-export async function createPrepBooth(employeeId, selectedBatchJobIds) {
-  // Create new prep batch
-  const { data: batch, error: bErr } = await supabase
+// Returns status of all 3 booths currently in prep stage
+export async function getBoothStatus() {
+  const { data } = await supabase
     .from('paint_batches')
-    .insert({ created_by: employeeId, current_stage: 'prep' })
-    .select()
-    .single()
-  if (bErr) throw bErr
+    .select('batch_id, booth_number, paint_batch_jobs(count), paint_batch_members(employees(full_name))')
+    .eq('current_stage', 'prep')
+    .not('booth_number', 'is', null)
+  const map = { 1: null, 2: null, 3: null }
+  for (const b of data ?? []) map[b.booth_number] = b
+  return map   // { 1: batch|null, 2: batch|null, 3: batch|null }
+}
 
-  // Get the selected paint_batch_jobs rows to copy their job_id and work_type
-  const { data: sourceJobs, error: sErr } = await supabase
-    .from('paint_batch_jobs')
-    .select('id, job_id, work_type')
-    .in('id', selectedBatchJobIds)
-  if (sErr) throw sErr
+// Prep selects jobs and assigns them to a booth (join existing or create new)
+export async function joinOrCreatePrepBooth(boothNumber, employeeId, selectedBatchJobIds) {
+  // Find or create a prep batch for this booth number
+  const { data: existing } = await supabase
+    .from('paint_batches')
+    .select('batch_id')
+    .eq('current_stage', 'prep')
+    .eq('booth_number', boothNumber)
+    .limit(1)
+    .maybeSingle()
 
-  // Insert into new prep batch
-  const { data: newJobs, error: iErr } = await supabase
-    .from('paint_batch_jobs')
-    .insert(sourceJobs.map(j => ({
-      batch_id: batch.batch_id,
-      job_id: j.job_id,
-      work_type: j.work_type,
-    })))
-    .select('*, jobs(job_id, po_number, part_number, quantity)')
-  if (iErr) throw iErr
+  let batchId
+  if (existing) {
+    batchId = existing.batch_id
+  } else {
+    const { data: newBatch, error } = await supabase
+      .from('paint_batches')
+      .insert({ created_by: employeeId, current_stage: 'prep', booth_number: boothNumber })
+      .select('batch_id')
+      .single()
+    if (error) throw error
+    batchId = newBatch.batch_id
+  }
 
-  // Mark source jobs as claimed
-  await supabase
-    .from('paint_batch_jobs')
-    .update({ status: 'claimed' })
-    .in('id', selectedBatchJobIds)
-
-  // If all jobs from a blast batch are claimed, advance it to consumed
-  // (just mark blast batches that have no remaining available jobs as fully claimed)
-  const blastBatchIds = [...new Set(
-    (await supabase.from('paint_batch_jobs').select('batch_id').in('id', selectedBatchJobIds)).data?.map(r => r.batch_id) ?? []
-  )]
-  for (const blastBatchId of blastBatchIds) {
-    const { count } = await supabase
+  // Copy selected jobs into this booth batch
+  if (selectedBatchJobIds.length > 0) {
+    const { data: sourceJobs, error: sErr } = await supabase
       .from('paint_batch_jobs')
-      .select('*', { count: 'exact', head: true })
-      .eq('batch_id', blastBatchId)
-      .eq('status', 'available')
-    if (count === 0) {
-      await supabase.from('paint_batches').update({ current_stage: 'consumed' }).eq('batch_id', blastBatchId)
+      .select('id, job_id, work_type')
+      .in('id', selectedBatchJobIds)
+    if (sErr) throw sErr
+
+    await supabase.from('paint_batch_jobs').insert(
+      sourceJobs.map(j => ({ batch_id: batchId, job_id: j.job_id, work_type: j.work_type }))
+    )
+    await supabase.from('paint_batch_jobs').update({ status: 'claimed' }).in('id', selectedBatchJobIds)
+
+    // Advance any fully-claimed blast batches
+    const blastIds = [...new Set(
+      (await supabase.from('paint_batch_jobs').select('batch_id').in('id', selectedBatchJobIds)).data?.map(r => r.batch_id) ?? []
+    )]
+    for (const bid of blastIds) {
+      const { count } = await supabase.from('paint_batch_jobs')
+        .select('*', { count: 'exact', head: true }).eq('batch_id', bid).eq('status', 'available')
+      if (count === 0) await supabase.from('paint_batches').update({ current_stage: 'consumed' }).eq('batch_id', bid)
     }
   }
 
-  return { batch, jobs: newJobs ?? [] }
+  // Add this employee as a member of this booth
+  await supabase.from('paint_batch_members')
+    .upsert({ batch_id: batchId, employee_id: employeeId, stage: 'prep' }, { onConflict: 'batch_id,employee_id,stage' })
+
+  // Load full batch for return
+  const { data: batch } = await supabase
+    .from('paint_batches')
+    .select('*, paint_batch_jobs(*, jobs(job_id, po_number, part_number, quantity)), paint_batch_members(*, employees(employee_id, full_name))')
+    .eq('batch_id', batchId)
+    .single()
+  return batch
 }
 
 export async function addJobToPaintBatch(batchId, poNumber, partNumber, workType) {

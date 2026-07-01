@@ -4,7 +4,8 @@ import {
   loadActivePaintBatch,
   loadAvailablePaintBatches,
   loadAvailablePoolJobs,
-  createPrepBooth,
+  getBoothStatus,
+  joinOrCreatePrepBooth,
   addJobToPaintBatch,
   removeJobFromPaintBatch,
   getPaintBatchStartTime,
@@ -77,6 +78,43 @@ function ConfirmModal({ title, message, confirmLabel = 'Confirm', onConfirm, onC
           <button className="btn-ghost flex-1" onClick={onCancel}>Cancel</button>
           <button className="btn-green flex-1" onClick={onConfirm}>{confirmLabel}</button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Booth picker modal ────────────────────────────────────────────────────────
+function BoothPickerModal({ boothStatus, selectedCount, onPick, onCancel }) {
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-6">
+      <div className="bg-stone-800 border border-stone-600 rounded-2xl p-8 w-full max-w-sm">
+        <h2 className="text-2xl font-bold text-stone-100 mb-2 text-center">Which Booth?</h2>
+        <p className="text-stone-500 text-sm text-center mb-6">Loading {selectedCount} job{selectedCount !== 1 ? 's' : ''} into…</p>
+        <div className="flex flex-col gap-3">
+          {[1, 2, 3].map(n => {
+            const b = boothStatus[n]
+            const jobCount = b?.paint_batch_jobs?.[0]?.count ?? 0
+            const members  = b?.paint_batch_members ?? []
+            return (
+              <button key={n} onClick={() => onPick(n)}
+                className={`rounded-2xl border-2 px-5 py-4 text-left transition-colors
+                  ${b ? 'border-yellow-500 bg-yellow-500/10 hover:bg-yellow-500/20' : 'border-stone-600 bg-stone-900 hover:border-yellow-400'}`}>
+                <div className="flex items-center justify-between">
+                  <p className="text-xl font-bold text-stone-100">Booth {n}</p>
+                  {b ? (
+                    <span className="text-yellow-400 text-sm font-semibold">{jobCount} job{jobCount !== 1 ? 's' : ''} loading</span>
+                  ) : (
+                    <span className="text-stone-500 text-sm">Empty</span>
+                  )}
+                </div>
+                {members.length > 0 && (
+                  <p className="text-xs text-stone-500 mt-1">{members.map(m => m.employees?.full_name).join(', ')}</p>
+                )}
+              </button>
+            )
+          })}
+        </div>
+        <button className="btn-ghost w-full mt-4" onClick={onCancel}>Cancel</button>
       </div>
     </div>
   )
@@ -181,7 +219,8 @@ function AvailableBatchCard({ batch, prevStage, onClaim }) {
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <p className="text-xs text-stone-500 uppercase tracking-widest mb-1">
-            Batch #{batch.batch_number} · from {STAGE_LABEL[prevStage] ?? prevStage}
+            {batch.booth_number ? `Booth ${batch.booth_number}` : `Batch #${batch.batch_number}`}
+            {' · from '}{STAGE_LABEL[prevStage] ?? prevStage}
           </p>
           <p className="text-stone-400 text-sm">{jobs.length} job{jobs.length !== 1 ? 's' : ''}</p>
         </div>
@@ -216,7 +255,7 @@ function ActiveBatchPanel({ batch, jobs: jobsProp, stage, startedAt, team, onCom
       <div className={`${bg} px-5 py-3 flex items-center justify-between`}>
         <div>
           <p className={`text-xs font-semibold uppercase tracking-widest ${colour}`}>
-            {STAGE_LABEL[stage]} · Batch #{batch.batch_number}
+            {STAGE_LABEL[stage]} · {batch.booth_number ? `Booth ${batch.booth_number}` : `Batch #${batch.batch_number}`}
           </p>
           <p className="text-stone-400 text-sm mt-0.5">{jobs.length} job{jobs.length !== 1 ? 's' : ''}</p>
         </div>
@@ -494,16 +533,17 @@ function TeamBadgeScan({ team, onScan, scanning, accentClass = 'focus:border-amb
 
 // ── PREP VIEW — selects individual jobs from blast pool into a booth ───────────
 function PrepView({ employee }) {
-  const [phase, setPhase]         = useState('loading')  // loading | pool | setup | active
-  const [poolJobs, setPoolJobs]   = useState([])
-  const [selected, setSelected]   = useState(new Set())  // set of paint_batch_jobs.id
-  const [batch, setBatch]         = useState(null)
-  const [jobs, setJobs]           = useState([])
-  const [team, setTeam]           = useState([{ employee_id: employee.employee_id, full_name: employee.full_name }])
-  const [startedAt, setStartedAt] = useState(null)
-  const [modal, setModal]         = useState(null)
-  const [error, setError]         = useState('')
-  const [scanning, setScanning]   = useState(false)
+  const [phase, setPhase]           = useState('loading')  // loading | pool | setup | active
+  const [poolJobs, setPoolJobs]     = useState([])
+  const [selected, setSelected]     = useState(new Set())  // set of paint_batch_jobs.id
+  const [boothStatus, setBoothStatus] = useState({ 1: null, 2: null, 3: null })
+  const [batch, setBatch]           = useState(null)
+  const [jobs, setJobs]             = useState([])
+  const [team, setTeam]             = useState([{ employee_id: employee.employee_id, full_name: employee.full_name }])
+  const [startedAt, setStartedAt]   = useState(null)
+  const [modal, setModal]           = useState(null)
+  const [error, setError]           = useState('')
+  const [scanning, setScanning]     = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -520,16 +560,18 @@ function PrepView({ employee }) {
         setPhase('active')
         return
       }
-      const pool = await loadAvailablePoolJobs()
+      const [pool, booths] = await Promise.all([loadAvailablePoolJobs(), getBoothStatus()])
       setPoolJobs(pool)
+      setBoothStatus(booths)
       setPhase('pool')
     }
     load().catch(() => setPhase('pool'))
   }, [employee.employee_id])
 
   async function refreshPool() {
-    const pool = await loadAvailablePoolJobs()
+    const [pool, booths] = await Promise.all([loadAvailablePoolJobs(), getBoothStatus()])
     setPoolJobs(pool)
+    setBoothStatus(booths)
   }
 
   function toggleJob(id) {
@@ -540,16 +582,21 @@ function PrepView({ employee }) {
     })
   }
 
-  async function handleCreateBooth() {
-    if (!selected.size) { setError('Select at least one job for this booth.'); return }
+  async function handleBoothPick(boothNumber) {
+    setModal(null)
     try {
-      const { batch: b, jobs: j } = await createPrepBooth(employee.employee_id, [...selected])
+      const b = await joinOrCreatePrepBooth(boothNumber, employee.employee_id, [...selected])
       setBatch(b)
-      setJobs(j)
+      setJobs(b.paint_batch_jobs ?? [])
       setSelected(new Set())
-      setTeam([{ employee_id: employee.employee_id, full_name: employee.full_name }])
-      setPhase('setup')
-    } catch { setError('Could not create booth — check connection.') }
+      const members = (b.paint_batch_members ?? [])
+        .filter(m => m.stage === 'prep')
+        .map(m => ({ employee_id: m.employee_id, full_name: m.employees?.full_name ?? m.employee_id }))
+      setTeam(members.length ? members : [{ employee_id: employee.employee_id, full_name: employee.full_name }])
+      const t = await getPaintBatchStartTime(b.batch_id)
+      setStartedAt(t)
+      setPhase(t ? 'active' : 'setup')
+    } catch { setError('Could not join/create booth — check connection.') }
   }
 
   async function handleBadgeScan(raw) {
@@ -598,7 +645,7 @@ function PrepView({ employee }) {
         <div className="bg-stone-800 border-2 border-yellow-500/40 rounded-2xl overflow-hidden">
           <div className="bg-yellow-500/10 px-5 py-3">
             <p className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">
-              Booth #{batch?.batch_number} · Add your team
+              {batch?.booth_number ? `Booth ${batch.booth_number}` : `Batch #${batch?.batch_number}`} · Add your team
             </p>
           </div>
           <div className="px-5 py-4 space-y-4">
@@ -657,7 +704,8 @@ function PrepView({ employee }) {
               </div>
 
               {selected.size > 0 && (
-                <button className="btn-primary w-full py-4 text-lg" onClick={handleCreateBooth}>
+                <button className="btn-primary w-full py-4 text-lg"
+                  onClick={() => setModal({ type: 'pick_booth' })}>
                   Load {selected.size} job{selected.size !== 1 ? 's' : ''} into Booth →
                 </button>
               )}
@@ -666,6 +714,7 @@ function PrepView({ employee }) {
         </>
       )}
 
+      {modal?.type === 'pick_booth'       && <BoothPickerModal boothStatus={boothStatus} selectedCount={selected.size} onPick={handleBoothPick} onCancel={() => setModal(null)} />}
       {modal?.type === 'confirm_start'    && <ConfirmModal title="Start Prep?" message={`${jobs.length} job${jobs.length !== 1 ? 's' : ''} · ${team.length} team member${team.length !== 1 ? 's' : ''}`} confirmLabel="Start Prep ▶" onConfirm={handleStartConfirm} onCancel={() => setModal(null)} />}
       {modal?.type === 'confirm_complete' && <ConfirmModal title="Complete Prep?" message="Booth will move to the Paint queue." confirmLabel="Complete ✓" onConfirm={handleCompleteConfirm} onCancel={() => setModal(null)} />}
     </div>
@@ -758,7 +807,7 @@ function StageView({ employee, stage }) {
         <div className={`bg-stone-800 border-2 ${STAGE_BORDER[stage]}/40 rounded-2xl overflow-hidden`}>
           <div className={`${STAGE_BG[stage]} px-5 py-3`}>
             <p className={`text-xs font-semibold uppercase tracking-widest ${STAGE_COLOUR[stage]}`}>
-              Batch #{batch?.batch_number} · Add your team
+              {batch?.booth_number ? `Booth ${batch.booth_number}` : `Batch #${batch?.batch_number}`} · Add your team
             </p>
           </div>
           <div className="px-5 py-4 space-y-4">
