@@ -1022,6 +1022,71 @@ export async function loadAvailablePaintBatches(forStage) {
   return data ?? []
 }
 
+// For prep: load all individual unclaimed jobs from blast_done batches
+export async function loadAvailablePoolJobs() {
+  const { data, error } = await supabase
+    .from('paint_batch_jobs')
+    .select('*, jobs(job_id, po_number, part_number, quantity), paint_batches!inner(batch_id, batch_number, current_stage)')
+    .eq('paint_batches.current_stage', 'blast_done')
+    .eq('status', 'available')
+    .order('added_at', { ascending: true })
+  if (error) throw error
+  return data ?? []
+}
+
+// Prep creates a new booth batch by selecting jobs from the pool
+export async function createPrepBooth(employeeId, selectedBatchJobIds) {
+  // Create new prep batch
+  const { data: batch, error: bErr } = await supabase
+    .from('paint_batches')
+    .insert({ created_by: employeeId, current_stage: 'prep' })
+    .select()
+    .single()
+  if (bErr) throw bErr
+
+  // Get the selected paint_batch_jobs rows to copy their job_id and work_type
+  const { data: sourceJobs, error: sErr } = await supabase
+    .from('paint_batch_jobs')
+    .select('id, job_id, work_type')
+    .in('id', selectedBatchJobIds)
+  if (sErr) throw sErr
+
+  // Insert into new prep batch
+  const { data: newJobs, error: iErr } = await supabase
+    .from('paint_batch_jobs')
+    .insert(sourceJobs.map(j => ({
+      batch_id: batch.batch_id,
+      job_id: j.job_id,
+      work_type: j.work_type,
+    })))
+    .select('*, jobs(job_id, po_number, part_number, quantity)')
+  if (iErr) throw iErr
+
+  // Mark source jobs as claimed
+  await supabase
+    .from('paint_batch_jobs')
+    .update({ status: 'claimed' })
+    .in('id', selectedBatchJobIds)
+
+  // If all jobs from a blast batch are claimed, advance it to consumed
+  // (just mark blast batches that have no remaining available jobs as fully claimed)
+  const blastBatchIds = [...new Set(
+    (await supabase.from('paint_batch_jobs').select('batch_id').in('id', selectedBatchJobIds)).data?.map(r => r.batch_id) ?? []
+  )]
+  for (const blastBatchId of blastBatchIds) {
+    const { count } = await supabase
+      .from('paint_batch_jobs')
+      .select('*', { count: 'exact', head: true })
+      .eq('batch_id', blastBatchId)
+      .eq('status', 'available')
+    if (count === 0) {
+      await supabase.from('paint_batches').update({ current_stage: 'consumed' }).eq('batch_id', blastBatchId)
+    }
+  }
+
+  return { batch, jobs: newJobs ?? [] }
+}
+
 export async function addJobToPaintBatch(batchId, poNumber, partNumber, workType) {
   const { job } = await findOrCreateJob(poNumber, partNumber, 'paint')
   const { error } = await supabase

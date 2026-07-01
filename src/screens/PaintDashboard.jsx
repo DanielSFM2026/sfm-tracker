@@ -3,6 +3,8 @@ import {
   createPaintBatch,
   loadActivePaintBatch,
   loadAvailablePaintBatches,
+  loadAvailablePoolJobs,
+  createPrepBooth,
   addJobToPaintBatch,
   removeJobFromPaintBatch,
   getPaintBatchStartTime,
@@ -202,12 +204,12 @@ function AvailableBatchCard({ batch, prevStage, onClaim }) {
 }
 
 // ── Active batch panel (timer + complete button) ──────────────────────────────
-function ActiveBatchPanel({ batch, stage, startedAt, team, onComplete }) {
+function ActiveBatchPanel({ batch, jobs: jobsProp, stage, startedAt, team, onComplete }) {
   const elapsed = useElapsed(startedAt)
   const colour  = STAGE_COLOUR[stage]
   const border  = STAGE_BORDER[stage]
   const bg      = STAGE_BG[stage]
-  const jobs    = batch.paint_batch_jobs ?? []
+  const jobs    = jobsProp ?? batch.paint_batch_jobs ?? []
 
   return (
     <div className={`rounded-2xl border-2 ${border} overflow-hidden`}>
@@ -382,6 +384,7 @@ function BlastView({ employee, onLogout, resetInactivity }) {
           {phase === 'active' ? (
             <ActiveBatchPanel
               batch={batch}
+              jobs={jobs}
               stage="blast"
               startedAt={startedAt}
               team={team}
@@ -489,27 +492,27 @@ function TeamBadgeScan({ team, onScan, scanning, accentClass = 'focus:border-amb
   )
 }
 
-// ── STAGE VIEW (Prep / Paint / Pack) ──────────────────────────────────────────
-function StageView({ employee, stage, onLogout }) {
-  const [phase, setPhase]       = useState('loading')   // loading | queue | setup | active
-  const [available, setAvailable] = useState([])
-  const [batch, setBatch]       = useState(null)
-  const [jobs, setJobs]         = useState([])
-  const [team, setTeam]         = useState([{ employee_id: employee.employee_id, full_name: employee.full_name }])
+// ── PREP VIEW — selects individual jobs from blast pool into a booth ───────────
+function PrepView({ employee }) {
+  const [phase, setPhase]         = useState('loading')  // loading | pool | setup | active
+  const [poolJobs, setPoolJobs]   = useState([])
+  const [selected, setSelected]   = useState(new Set())  // set of paint_batch_jobs.id
+  const [batch, setBatch]         = useState(null)
+  const [jobs, setJobs]           = useState([])
+  const [team, setTeam]           = useState([{ employee_id: employee.employee_id, full_name: employee.full_name }])
   const [startedAt, setStartedAt] = useState(null)
-  const [modal, setModal]       = useState(null)
-  const [error, setError]       = useState('')
-  const [scanning, setScanning] = useState(false)
+  const [modal, setModal]         = useState(null)
+  const [error, setError]         = useState('')
+  const [scanning, setScanning]   = useState(false)
 
-  // Load on mount
   useEffect(() => {
     async function load() {
-      const active = await loadActivePaintBatch(employee.employee_id, stage)
+      const active = await loadActivePaintBatch(employee.employee_id, 'prep')
       if (active) {
         setBatch(active)
         setJobs(active.paint_batch_jobs ?? [])
         const members = (active.paint_batch_members ?? [])
-          .filter(m => m.stage === stage)
+          .filter(m => m.stage === 'prep')
           .map(m => ({ employee_id: m.employee_id, full_name: m.employees?.full_name ?? m.employee_id }))
         setTeam(members.length ? members : [{ employee_id: employee.employee_id, full_name: employee.full_name }])
         const t = await getPaintBatchStartTime(active.batch_id)
@@ -517,23 +520,36 @@ function StageView({ employee, stage, onLogout }) {
         setPhase('active')
         return
       }
-      const avail = await loadAvailablePaintBatches(stage)
-      setAvailable(avail)
-      setPhase(avail.length ? 'queue' : 'queue')
+      const pool = await loadAvailablePoolJobs()
+      setPoolJobs(pool)
+      setPhase('pool')
     }
-    load().catch(() => setPhase('queue'))
-  }, [employee.employee_id, stage])
+    load().catch(() => setPhase('pool'))
+  }, [employee.employee_id])
 
-  async function refreshQueue() {
-    const avail = await loadAvailablePaintBatches(stage)
-    setAvailable(avail)
+  async function refreshPool() {
+    const pool = await loadAvailablePoolJobs()
+    setPoolJobs(pool)
   }
 
-  function handleClaim(b) {
-    setBatch(b)
-    setJobs(b.paint_batch_jobs ?? [])
-    setTeam([{ employee_id: employee.employee_id, full_name: employee.full_name }])
-    setPhase('setup')
+  function toggleJob(id) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  async function handleCreateBooth() {
+    if (!selected.size) { setError('Select at least one job for this booth.'); return }
+    try {
+      const { batch: b, jobs: j } = await createPrepBooth(employee.employee_id, [...selected])
+      setBatch(b)
+      setJobs(j)
+      setSelected(new Set())
+      setTeam([{ employee_id: employee.employee_id, full_name: employee.full_name }])
+      setPhase('setup')
+    } catch { setError('Could not create booth — check connection.') }
   }
 
   async function handleBadgeScan(raw) {
@@ -541,41 +557,29 @@ function StageView({ employee, stage, onLogout }) {
     try {
       const member = await findTeamMember(raw)
       if (!member) { setError(`Badge not recognised: "${raw}"`); return }
-      if (team.find(m => m.employee_id === member.employee_id)) {
-        setError(`${member.full_name} is already on the team.`); return
-      }
+      if (team.find(m => m.employee_id === member.employee_id)) { setError(`${member.full_name} already on team.`); return }
       setTeam(prev => [...prev, { employee_id: member.employee_id, full_name: member.full_name }])
-    } catch { setError('Could not look up badge — check connection.') }
+    } catch { setError('Could not look up badge.') }
     finally { setScanning(false) }
-  }
-
-  async function handleStart() {
-    setModal({ type: 'confirm_start' })
   }
 
   async function handleStartConfirm() {
     setModal(null)
     try {
       const memberIds = team.map(m => m.employee_id)
-      const t = await startPaintBatchStage(batch.batch_id, stage, memberIds, jobs)
-      setStartedAt(t)
-      setPhase('active')
+      const t = await startPaintBatchStage(batch.batch_id, 'prep', memberIds, jobs)
+      setStartedAt(t); setPhase('active')
     } catch { setError('Failed to start — check connection.') }
-  }
-
-  async function handleComplete() {
-    setModal({ type: 'confirm_complete' })
   }
 
   async function handleCompleteConfirm() {
     setModal(null)
     try {
       const memberIds = team.map(m => m.employee_id)
-      await completePaintBatchStage(batch.batch_id, stage, memberIds, jobs)
+      await completePaintBatchStage(batch.batch_id, 'prep', memberIds, jobs)
       setBatch(null); setJobs([]); setStartedAt(null)
       setTeam([{ employee_id: employee.employee_id, full_name: employee.full_name }])
-      await refreshQueue()
-      setPhase('queue')
+      await refreshPool(); setPhase('pool')
     } catch { setError('Failed to complete — check connection.') }
   }
 
@@ -586,13 +590,168 @@ function StageView({ employee, stage, onLogout }) {
       {error && <p className="text-red-400 text-sm bg-red-900/20 rounded-xl px-4 py-3">{error}</p>}
 
       {phase === 'active' && (
-        <ActiveBatchPanel
-          batch={batch}
-          stage={stage}
-          startedAt={startedAt}
-          team={team}
-          onComplete={handleComplete}
-        />
+        <ActiveBatchPanel batch={batch} jobs={jobs} stage="prep" startedAt={startedAt} team={team}
+          onComplete={() => setModal({ type: 'confirm_complete' })} />
+      )}
+
+      {phase === 'setup' && (
+        <div className="bg-stone-800 border-2 border-yellow-500/40 rounded-2xl overflow-hidden">
+          <div className="bg-yellow-500/10 px-5 py-3">
+            <p className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">
+              Booth #{batch?.batch_number} · Add your team
+            </p>
+          </div>
+          <div className="px-5 py-4 space-y-4">
+            <div>
+              <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Jobs in this booth</p>
+              <JobList jobs={jobs} />
+            </div>
+            <div>
+              <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Your team</p>
+              <TeamBadgeScan team={team} onScan={handleBadgeScan} scanning={scanning} accentClass="focus:border-yellow-400" />
+            </div>
+            <div className="flex gap-3">
+              <button className="btn-primary flex-1 py-4 text-lg" onClick={() => setModal({ type: 'confirm_start' })}>
+                ▶ Start Prep
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {phase === 'pool' && (
+        <>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-stone-500 uppercase tracking-widest">Available from Blast</p>
+            <button onClick={refreshPool} className="text-xs text-stone-500 underline">Refresh</button>
+          </div>
+
+          {poolJobs.length === 0 ? (
+            <div className="text-center py-16 text-stone-600">
+              <p className="text-4xl mb-4">⏳</p>
+              <p className="text-lg">No blasted jobs available yet</p>
+            </div>
+          ) : (
+            <>
+              <p className="text-xs text-stone-500">Tap jobs to select them for this booth</p>
+              <div className="space-y-2">
+                {poolJobs.map(bj => {
+                  const sel = selected.has(bj.id)
+                  return (
+                    <button key={bj.id} onClick={() => toggleJob(bj.id)}
+                      className={`w-full flex items-center gap-3 rounded-xl px-4 py-3 border-2 transition-colors text-left
+                        ${sel ? 'bg-yellow-500/10 border-yellow-500' : 'bg-stone-900 border-stone-700 hover:border-stone-500'}`}>
+                      <div className={`w-5 h-5 rounded border-2 shrink-0 flex items-center justify-center
+                        ${sel ? 'bg-yellow-500 border-yellow-500' : 'border-stone-600'}`}>
+                        {sel && <span className="text-black text-xs font-bold">✓</span>}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-stone-100 font-semibold truncate">{bj.jobs?.po_number}</p>
+                        <p className="text-xs text-stone-500">Part: {bj.jobs?.part_number}</p>
+                        {bj.work_type && <p className="text-xs text-red-400 mt-0.5">{WORK_LABEL[bj.work_type]}</p>}
+                      </div>
+                      <p className="text-xs text-stone-600 shrink-0">Batch #{bj.paint_batches?.batch_number}</p>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {selected.size > 0 && (
+                <button className="btn-primary w-full py-4 text-lg" onClick={handleCreateBooth}>
+                  Load {selected.size} job{selected.size !== 1 ? 's' : ''} into Booth →
+                </button>
+              )}
+            </>
+          )}
+        </>
+      )}
+
+      {modal?.type === 'confirm_start'    && <ConfirmModal title="Start Prep?" message={`${jobs.length} job${jobs.length !== 1 ? 's' : ''} · ${team.length} team member${team.length !== 1 ? 's' : ''}`} confirmLabel="Start Prep ▶" onConfirm={handleStartConfirm} onCancel={() => setModal(null)} />}
+      {modal?.type === 'confirm_complete' && <ConfirmModal title="Complete Prep?" message="Booth will move to the Paint queue." confirmLabel="Complete ✓" onConfirm={handleCompleteConfirm} onCancel={() => setModal(null)} />}
+    </div>
+  )
+}
+
+// ── STAGE VIEW (Paint / Pack) ─────────────────────────────────────────────────
+function StageView({ employee, stage }) {
+  const [phase, setPhase]       = useState('loading')
+  const [available, setAvailable] = useState([])
+  const [batch, setBatch]       = useState(null)
+  const [jobs, setJobs]         = useState([])
+  const [team, setTeam]         = useState([{ employee_id: employee.employee_id, full_name: employee.full_name }])
+  const [startedAt, setStartedAt] = useState(null)
+  const [modal, setModal]       = useState(null)
+  const [error, setError]       = useState('')
+  const [scanning, setScanning] = useState(false)
+
+  useEffect(() => {
+    async function load() {
+      const active = await loadActivePaintBatch(employee.employee_id, stage)
+      if (active) {
+        setBatch(active); setJobs(active.paint_batch_jobs ?? [])
+        const members = (active.paint_batch_members ?? []).filter(m => m.stage === stage)
+          .map(m => ({ employee_id: m.employee_id, full_name: m.employees?.full_name ?? m.employee_id }))
+        setTeam(members.length ? members : [{ employee_id: employee.employee_id, full_name: employee.full_name }])
+        const t = await getPaintBatchStartTime(active.batch_id)
+        setStartedAt(t); setPhase('active'); return
+      }
+      const avail = await loadAvailablePaintBatches(stage)
+      setAvailable(avail); setPhase('queue')
+    }
+    load().catch(() => setPhase('queue'))
+  }, [employee.employee_id, stage])
+
+  async function refreshQueue() {
+    const avail = await loadAvailablePaintBatches(stage)
+    setAvailable(avail)
+  }
+
+  function handleClaim(b) {
+    setBatch(b); setJobs(b.paint_batch_jobs ?? [])
+    setTeam([{ employee_id: employee.employee_id, full_name: employee.full_name }])
+    setPhase('setup')
+  }
+
+  async function handleBadgeScan(raw) {
+    setScanning(true); setError('')
+    try {
+      const member = await findTeamMember(raw)
+      if (!member) { setError(`Badge not recognised: "${raw}"`); return }
+      if (team.find(m => m.employee_id === member.employee_id)) { setError(`${member.full_name} already on team.`); return }
+      setTeam(prev => [...prev, { employee_id: member.employee_id, full_name: member.full_name }])
+    } catch { setError('Could not look up badge.') }
+    finally { setScanning(false) }
+  }
+
+  async function handleStartConfirm() {
+    setModal(null)
+    try {
+      const memberIds = team.map(m => m.employee_id)
+      const t = await startPaintBatchStage(batch.batch_id, stage, memberIds, jobs)
+      setStartedAt(t); setPhase('active')
+    } catch { setError('Failed to start.') }
+  }
+
+  async function handleCompleteConfirm() {
+    setModal(null)
+    try {
+      const memberIds = team.map(m => m.employee_id)
+      await completePaintBatchStage(batch.batch_id, stage, memberIds, jobs)
+      setBatch(null); setJobs([]); setStartedAt(null)
+      setTeam([{ employee_id: employee.employee_id, full_name: employee.full_name }])
+      await refreshQueue(); setPhase('queue')
+    } catch { setError('Failed to complete.') }
+  }
+
+  if (phase === 'loading') return <div className="flex-1 flex items-center justify-center"><p className="text-stone-500 animate-pulse">Loading…</p></div>
+
+  return (
+    <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+      {error && <p className="text-red-400 text-sm bg-red-900/20 rounded-xl px-4 py-3">{error}</p>}
+
+      {phase === 'active' && (
+        <ActiveBatchPanel batch={batch} jobs={jobs} stage={stage} startedAt={startedAt} team={team}
+          onComplete={() => setModal({ type: 'confirm_complete' })} />
       )}
 
       {phase === 'setup' && (
@@ -609,18 +768,12 @@ function StageView({ employee, stage, onLogout }) {
             </div>
             <div>
               <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Your team</p>
-              <TeamBadgeScan
-                team={team}
-                onScan={handleBadgeScan}
-                scanning={scanning}
-                accentClass={`focus:border-${stage === 'prep' ? 'yellow' : stage === 'paint' ? 'red' : 'emerald'}-400`}
-              />
+              <TeamBadgeScan team={team} onScan={handleBadgeScan} scanning={scanning}
+                accentClass={stage === 'paint' ? 'focus:border-red-400' : 'focus:border-emerald-400'} />
             </div>
             <div className="flex gap-3">
-              <button className="btn-ghost flex-1" onClick={() => { setBatch(null); refreshQueue(); setPhase('queue') }}>
-                ← Back
-              </button>
-              <button className="btn-primary flex-1 py-4 text-lg" onClick={handleStart}>
+              <button className="btn-ghost flex-1" onClick={() => { setBatch(null); refreshQueue(); setPhase('queue') }}>← Back</button>
+              <button className="btn-primary flex-1 py-4 text-lg" onClick={() => setModal({ type: 'confirm_start' })}>
                 ▶ Start {STAGE_LABEL[stage]}
               </button>
             </div>
@@ -630,35 +783,26 @@ function StageView({ employee, stage, onLogout }) {
 
       {phase === 'queue' && (
         <>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-stone-500 uppercase tracking-widest">Ready from {PREV_LABEL[stage]}</p>
+            <button onClick={refreshQueue} className="text-xs text-stone-500 underline">Refresh</button>
+          </div>
           {available.length === 0 ? (
             <div className="text-center py-16 text-stone-600">
               <p className="text-4xl mb-4">⏳</p>
-              <p className="text-lg">No batches ready from {PREV_LABEL[stage]}</p>
-              <button onClick={refreshQueue} className="mt-4 text-sm text-stone-500 underline">Refresh</button>
+              <p className="text-lg">No booths ready from {PREV_LABEL[stage]}</p>
             </div>
           ) : (
-            <>
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-stone-500 uppercase tracking-widest">
-                  Ready from {PREV_LABEL[stage]}
-                </p>
-                <button onClick={refreshQueue} className="text-xs text-stone-500 underline">Refresh</button>
-              </div>
-              {available.map(b => (
-                <AvailableBatchCard
-                  key={b.batch_id}
-                  batch={b}
-                  prevStage={stage === 'prep' ? 'blast' : stage === 'paint' ? 'prep' : 'paint'}
-                  onClaim={handleClaim}
-                />
-              ))}
-            </>
+            available.map(b => (
+              <AvailableBatchCard key={b.batch_id} batch={b}
+                prevStage={stage === 'paint' ? 'prep' : 'paint'} onClaim={handleClaim} />
+            ))
           )}
         </>
       )}
 
       {modal?.type === 'confirm_start'    && <ConfirmModal title={`Start ${STAGE_LABEL[stage]}?`} message={`${jobs.length} job${jobs.length !== 1 ? 's' : ''} · ${team.length} team member${team.length !== 1 ? 's' : ''}`} confirmLabel={`Start ${STAGE_LABEL[stage]} ▶`} onConfirm={handleStartConfirm} onCancel={() => setModal(null)} />}
-      {modal?.type === 'confirm_complete' && <ConfirmModal title={`Complete ${STAGE_LABEL[stage]}?`} message={stage === 'pack' ? 'Batch will be fully complete.' : `Batch will move to the ${STAGE_LABEL[{ blast: 'prep', prep: 'paint', paint: 'pack' }[stage]]} queue.`} confirmLabel="Complete ✓" onConfirm={handleCompleteConfirm} onCancel={() => setModal(null)} />}
+      {modal?.type === 'confirm_complete' && <ConfirmModal title={`Complete ${STAGE_LABEL[stage]}?`} message={stage === 'pack' ? 'Batch fully complete.' : `Moves to ${STAGE_LABEL[{ paint: 'pack' }[stage] ?? 'pack']} queue.`} confirmLabel="Complete ✓" onConfirm={handleCompleteConfirm} onCancel={() => setModal(null)} />}
     </div>
   )
 }
@@ -702,10 +846,9 @@ export default function PaintDashboard({ employee, onLogout }) {
       </div>
 
       {/* Stage-specific view */}
-      {stage === 'blast'
-        ? <BlastView  employee={employee} onLogout={onLogout} />
-        : <StageView  employee={employee} stage={stage} onLogout={onLogout} />
-      }
+      {stage === 'blast' && <BlastView employee={employee} onLogout={onLogout} />}
+      {stage === 'prep'  && <PrepView  employee={employee} />}
+      {(stage === 'paint' || stage === 'pack') && <StageView employee={employee} stage={stage} />}
     </div>
   )
 }
