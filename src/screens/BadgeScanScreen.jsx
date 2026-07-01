@@ -148,7 +148,7 @@ export default function BadgeScanScreen({ onLogin, onManagerView }) {
 
       let jobs = []
       let splitMode = false
-      if (employee.department !== 'assembly') {
+      if (employee.department !== 'assembly' && employee.department !== 'paint') {
         const { splitMode: sm } = await handleSessionResume(employee.employee_id)
         jobs = await loadEmployeeJobs(employee.employee_id)
         splitMode = sm

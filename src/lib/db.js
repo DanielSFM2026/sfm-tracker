@@ -966,3 +966,144 @@ export async function handleSessionResume(employeeId) {
 
   return { splitMode: activeCount > 1 }
 }
+
+// ── Paint batch functions ─────────────────────────────────────────────────────
+
+const STAGE_NEXT = {
+  blast: 'blast_done',
+  prep:  'prep_done',
+  paint: 'paint_done',
+  pack:  'complete',
+}
+
+export async function createPaintBatch(employeeId) {
+  const { data, error } = await supabase
+    .from('paint_batches')
+    .insert({ created_by: employeeId, current_stage: 'blast' })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function loadActivePaintBatch(employeeId, stage) {
+  if (stage === 'blast') {
+    const { data } = await supabase
+      .from('paint_batches')
+      .select('*, paint_batch_jobs(*, jobs(job_id, po_number, part_number, quantity)), paint_batch_members(*, employees(employee_id, full_name))')
+      .eq('created_by', employeeId)
+      .eq('current_stage', 'blast')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    return data ?? null
+  }
+  const { data } = await supabase
+    .from('paint_batch_members')
+    .select('paint_batches!inner(*, paint_batch_jobs(*, jobs(job_id, po_number, part_number, quantity)), paint_batch_members(*, employees(employee_id, full_name)))')
+    .eq('employee_id', employeeId)
+    .eq('stage', stage)
+    .eq('paint_batches.current_stage', stage)
+    .limit(1)
+    .maybeSingle()
+  return data?.paint_batches ?? null
+}
+
+export async function loadAvailablePaintBatches(forStage) {
+  const stageMap = { prep: 'blast_done', paint: 'prep_done', pack: 'paint_done' }
+  const required = stageMap[forStage]
+  if (!required) return []
+  const { data, error } = await supabase
+    .from('paint_batches')
+    .select('*, paint_batch_jobs(*, jobs(job_id, po_number, part_number, quantity))')
+    .eq('current_stage', required)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data ?? []
+}
+
+export async function addJobToPaintBatch(batchId, poNumber, partNumber, workType) {
+  const { job } = await findOrCreateJob(poNumber, partNumber, 'paint')
+  const { error } = await supabase
+    .from('paint_batch_jobs')
+    .upsert({ batch_id: batchId, job_id: job.job_id, work_type: workType }, { onConflict: 'batch_id,job_id' })
+  if (error) throw error
+  return job
+}
+
+export async function removeJobFromPaintBatch(batchId, jobId) {
+  const { error } = await supabase
+    .from('paint_batch_jobs')
+    .delete()
+    .eq('batch_id', batchId)
+    .eq('job_id', jobId)
+  if (error) throw error
+}
+
+export async function getPaintBatchStartTime(batchId) {
+  const { data } = await supabase
+    .from('job_events')
+    .select('event_timestamp')
+    .eq('batch_id', batchId)
+    .eq('event_type', 'START')
+    .order('event_timestamp', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+  return data?.event_timestamp ?? null
+}
+
+export async function startPaintBatchStage(batchId, stage, memberIds, batchJobs) {
+  const now = new Date().toISOString()
+  const splitCount = Math.max(batchJobs.length, 1)
+
+  if (memberIds.length > 0) {
+    await supabase.from('paint_batch_members')
+      .upsert(memberIds.map(id => ({ batch_id: batchId, employee_id: id, stage })), { onConflict: 'batch_id,employee_id,stage' })
+  }
+
+  const events = memberIds.flatMap(employeeId =>
+    batchJobs.map(bj => ({
+      employee_id: employeeId,
+      job_id: bj.job_id,
+      event_type: 'START',
+      event_timestamp: now,
+      split_count: splitCount,
+      batch_id: batchId,
+    }))
+  )
+  if (events.length > 0) {
+    const { error } = await supabase.from('job_events').insert(events)
+    if (error) throw error
+  }
+
+  const { error } = await supabase
+    .from('paint_batches')
+    .update({ current_stage: stage })
+    .eq('batch_id', batchId)
+  if (error) throw error
+  return now
+}
+
+export async function completePaintBatchStage(batchId, stage, memberIds, batchJobs) {
+  const nextStage = STAGE_NEXT[stage]
+  const now = new Date().toISOString()
+
+  const events = memberIds.flatMap(employeeId =>
+    batchJobs.map(bj => ({
+      employee_id: employeeId,
+      job_id: bj.job_id,
+      event_type: 'COMPLETE',
+      event_timestamp: now,
+      batch_id: batchId,
+    }))
+  )
+  if (events.length > 0) {
+    const { error } = await supabase.from('job_events').insert(events)
+    if (error) throw error
+  }
+
+  const update = { current_stage: nextStage }
+  if (nextStage === 'complete') update.completed_at = now
+  const { error } = await supabase.from('paint_batches').update(update).eq('batch_id', batchId)
+  if (error) throw error
+}
