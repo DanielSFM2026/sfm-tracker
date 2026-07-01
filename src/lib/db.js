@@ -1137,6 +1137,12 @@ export async function getPaintBatchStartTime(batchId) {
   return data?.event_timestamp ?? null
 }
 
+// Write a member to paint_batch_members immediately (before start) so they see the batch via polling
+export async function addBatchMember(batchId, employeeId, stage) {
+  await supabase.from('paint_batch_members')
+    .upsert({ batch_id: batchId, employee_id: employeeId, stage }, { onConflict: 'batch_id,employee_id,stage' })
+}
+
 export async function startPaintBatchStage(batchId, stage, memberIds, batchJobs) {
   const now = new Date().toISOString()
   const splitCount = Math.max(batchJobs.length, 1)

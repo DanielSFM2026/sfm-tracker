@@ -11,6 +11,7 @@ import {
   getPaintBatchStartTime,
   startPaintBatchStage,
   completePaintBatchStage,
+  addBatchMember,
   findTeamMember,
 } from '../lib/db'
 import { parseJobBarcode, formatDuration } from '../lib/timeCalc'
@@ -293,31 +294,44 @@ function BlastView({ employee, onLogout, resetInactivity }) {
   const [error, setError]       = useState('')
   const [scanning, setScanning] = useState(false)
 
-  const scanRef = useRef(null)
-  const bufRef  = useRef('')
+  const scanRef    = useRef(null)
+  const bufRef     = useRef('')
+  const phaseRef   = useRef(phase)
+  const batchIdRef = useRef(null)
+  useEffect(() => { phaseRef.current = phase }, [phase])
 
-  // Load existing batch on mount
-  useEffect(() => {
-    loadActivePaintBatch(employee.employee_id, 'blast')
-      .then(async b => {
-        if (!b) { setPhase('idle'); return }
+  async function loadBatch(silent = false) {
+    try {
+      const b = await loadActivePaintBatch(employee.employee_id, 'blast')
+      if (!b) { if (!silent) setPhase('idle'); return }
+      // Don't clobber local job list if same batch and already in setup/active
+      if (batchIdRef.current !== b.batch_id) {
+        batchIdRef.current = b.batch_id
         setBatch(b)
         setJobs(b.paint_batch_jobs ?? [])
-        // Determine if started: check for existing job_events
         const t = await getPaintBatchStartTime(b.batch_id)
-        if (t) {
-          const members = (b.paint_batch_members ?? []).map(m => ({
-            employee_id: m.employee_id,
-            full_name: m.employees?.full_name ?? m.employee_id,
-          }))
-          setTeam(members.length ? members : [{ employee_id: employee.employee_id, full_name: employee.full_name }])
-          setStartedAt(t)
-          setPhase('active')
-        } else {
-          setPhase('setup')
-        }
-      })
-      .catch(() => setPhase('idle'))
+        const members = (b.paint_batch_members ?? []).map(m => ({
+          employee_id: m.employee_id,
+          full_name: m.employees?.full_name ?? m.employee_id,
+        }))
+        setTeam(members.length ? members : [{ employee_id: employee.employee_id, full_name: employee.full_name }])
+        setStartedAt(t)
+        setPhase(t ? 'active' : 'setup')
+      } else if (phaseRef.current === 'active') {
+        // Sync team changes from DB while active
+        const members = (b.paint_batch_members ?? []).map(m => ({
+          employee_id: m.employee_id,
+          full_name: m.employees?.full_name ?? m.employee_id,
+        }))
+        if (members.length) setTeam(members)
+      }
+    } catch { if (!silent) setPhase('idle') }
+  }
+
+  useEffect(() => {
+    loadBatch()
+    const id = setInterval(() => loadBatch(true), 6000)
+    return () => clearInterval(id)
   }, [employee.employee_id])
 
   useEffect(() => { if (!modal) setTimeout(() => scanRef.current?.focus(), 50) }, [modal])
@@ -367,6 +381,7 @@ function BlastView({ employee, onLogout, resetInactivity }) {
       if (team.find(m => m.employee_id === member.employee_id)) {
         setError(`${member.full_name} is already on the team.`); return
       }
+      if (batch?.batch_id) await addBatchMember(batch.batch_id, member.employee_id, 'blast')
       setTeam(prev => [...prev, { employee_id: member.employee_id, full_name: member.full_name }])
     } catch { setError('Could not look up badge — check connection.') }
     finally { setScanning(false) }
@@ -393,13 +408,15 @@ function BlastView({ employee, onLogout, resetInactivity }) {
 
   async function handleCompleteConfirm() {
     setModal(null)
+    setPhase('loading')
     try {
       const memberIds = team.map(m => m.employee_id)
       await completePaintBatchStage(batch.batch_id, 'blast', memberIds, jobs)
+      batchIdRef.current = null
       setBatch(null); setJobs([]); setStartedAt(null)
       setTeam([{ employee_id: employee.employee_id, full_name: employee.full_name }])
       setPhase('idle')
-    } catch { setError('Failed to complete — check connection.') }
+    } catch { setError('Failed to complete — check connection.'); setPhase('active') }
   }
 
   if (phase === 'loading') return <div className="flex-1 flex items-center justify-center"><p className="text-stone-500 animate-pulse">Loading…</p></div>
@@ -533,59 +550,77 @@ function TeamBadgeScan({ team, onScan, scanning, accentClass = 'focus:border-amb
 
 // ── PREP VIEW — selects individual jobs from blast pool into a booth ───────────
 function PrepView({ employee }) {
-  const [phase, setPhase]           = useState('loading')  // loading | pool | setup | active
-  const [poolJobs, setPoolJobs]     = useState([])
-  const [selected, setSelected]     = useState(new Set())  // set of paint_batch_jobs.id
+  const [phase, setPhase]             = useState('loading')  // loading | pool | setup | active
+  const [poolJobs, setPoolJobs]       = useState([])
+  const [selected, setSelected]       = useState(new Set())
   const [boothStatus, setBoothStatus] = useState({ 1: null, 2: null, 3: null })
-  const [batch, setBatch]           = useState(null)
-  const [jobs, setJobs]             = useState([])
-  const [team, setTeam]             = useState([{ employee_id: employee.employee_id, full_name: employee.full_name }])
-  const [startedAt, setStartedAt]   = useState(null)
-  const [modal, setModal]           = useState(null)
-  const [error, setError]           = useState('')
-  const [scanning, setScanning]     = useState(false)
+  const [batch, setBatch]             = useState(null)
+  const [jobs, setJobs]               = useState([])
+  const [team, setTeam]               = useState([{ employee_id: employee.employee_id, full_name: employee.full_name }])
+  const [startedAt, setStartedAt]     = useState(null)
+  const [modal, setModal]             = useState(null)
+  const [error, setError]             = useState('')
+  const [scanning, setScanning]       = useState(false)
 
-  useEffect(() => {
-    async function load() {
+  const phaseRef   = useRef('loading')
+  const batchIdRef = useRef(null)
+  useEffect(() => { phaseRef.current = phase }, [phase])
+
+  async function loadState(silent = false) {
+    try {
       const active = await loadActivePaintBatch(employee.employee_id, 'prep')
       if (active) {
-        setBatch(active)
-        setJobs(active.paint_batch_jobs ?? [])
+        const isNew = batchIdRef.current !== active.batch_id
+        batchIdRef.current = active.batch_id
         const members = (active.paint_batch_members ?? [])
           .filter(m => m.stage === 'prep')
           .map(m => ({ employee_id: m.employee_id, full_name: m.employees?.full_name ?? m.employee_id }))
-        setTeam(members.length ? members : [{ employee_id: employee.employee_id, full_name: employee.full_name }])
-        const t = await getPaintBatchStartTime(active.batch_id)
-        setStartedAt(t)
-        setPhase('active')
+        if (isNew) {
+          setBatch(active)
+          setJobs(active.paint_batch_jobs ?? [])
+          setTeam(members.length ? members : [{ employee_id: employee.employee_id, full_name: employee.full_name }])
+          const t = await getPaintBatchStartTime(active.batch_id)
+          setStartedAt(t)
+          setPhase(t ? 'active' : 'setup')
+        } else {
+          // Sync team + jobs without disrupting local state
+          if (members.length) setTeam(members)
+          if (phaseRef.current === 'setup' || phaseRef.current === 'active') {
+            setJobs(active.paint_batch_jobs ?? [])
+          }
+        }
         return
       }
-      const [pool, booths] = await Promise.all([loadAvailablePoolJobs(), getBoothStatus()])
-      setPoolJobs(pool)
-      setBoothStatus(booths)
-      setPhase('pool')
-    }
-    load().catch(() => setPhase('pool'))
+      // No active batch — only update pool data, don't interrupt setup flow
+      if (phaseRef.current === 'pool' || !silent) {
+        const [pool, booths] = await Promise.all([loadAvailablePoolJobs(), getBoothStatus()])
+        setPoolJobs(pool)
+        setBoothStatus(booths)
+        if (!silent) setPhase('pool')
+      }
+    } catch { if (!silent) setPhase('pool') }
+  }
+
+  useEffect(() => {
+    loadState()
+    const id = setInterval(() => loadState(true), 6000)
+    return () => clearInterval(id)
   }, [employee.employee_id])
 
   async function refreshPool() {
     const [pool, booths] = await Promise.all([loadAvailablePoolJobs(), getBoothStatus()])
-    setPoolJobs(pool)
-    setBoothStatus(booths)
+    setPoolJobs(pool); setBoothStatus(booths)
   }
 
   function toggleJob(id) {
-    setSelected(prev => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
+    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
   }
 
   async function handleBoothPick(boothNumber) {
     setModal(null)
     try {
       const b = await joinOrCreatePrepBooth(boothNumber, employee.employee_id, [...selected])
+      batchIdRef.current = b.batch_id
       setBatch(b)
       setJobs(b.paint_batch_jobs ?? [])
       setSelected(new Set())
@@ -605,6 +640,7 @@ function PrepView({ employee }) {
       const member = await findTeamMember(raw)
       if (!member) { setError(`Badge not recognised: "${raw}"`); return }
       if (team.find(m => m.employee_id === member.employee_id)) { setError(`${member.full_name} already on team.`); return }
+      if (batch?.batch_id) await addBatchMember(batch.batch_id, member.employee_id, 'prep')
       setTeam(prev => [...prev, { employee_id: member.employee_id, full_name: member.full_name }])
     } catch { setError('Could not look up badge.') }
     finally { setScanning(false) }
@@ -621,13 +657,16 @@ function PrepView({ employee }) {
 
   async function handleCompleteConfirm() {
     setModal(null)
+    setPhase('loading')
     try {
       const memberIds = team.map(m => m.employee_id)
       await completePaintBatchStage(batch.batch_id, 'prep', memberIds, jobs)
+      batchIdRef.current = null
       setBatch(null); setJobs([]); setStartedAt(null)
       setTeam([{ employee_id: employee.employee_id, full_name: employee.full_name }])
-      await refreshPool(); setPhase('pool')
-    } catch { setError('Failed to complete — check connection.') }
+      await refreshPool()
+      setPhase('pool')
+    } catch { setError('Failed to complete — check connection.'); setPhase('active') }
   }
 
   if (phase === 'loading') return <div className="flex-1 flex items-center justify-center"><p className="text-stone-500 animate-pulse">Loading…</p></div>
@@ -723,31 +762,50 @@ function PrepView({ employee }) {
 
 // ── STAGE VIEW (Paint / Pack) ─────────────────────────────────────────────────
 function StageView({ employee, stage }) {
-  const [phase, setPhase]       = useState('loading')
+  const [phase, setPhase]         = useState('loading')
   const [available, setAvailable] = useState([])
-  const [batch, setBatch]       = useState(null)
-  const [jobs, setJobs]         = useState([])
-  const [team, setTeam]         = useState([{ employee_id: employee.employee_id, full_name: employee.full_name }])
+  const [batch, setBatch]         = useState(null)
+  const [jobs, setJobs]           = useState([])
+  const [team, setTeam]           = useState([{ employee_id: employee.employee_id, full_name: employee.full_name }])
   const [startedAt, setStartedAt] = useState(null)
-  const [modal, setModal]       = useState(null)
-  const [error, setError]       = useState('')
-  const [scanning, setScanning] = useState(false)
+  const [modal, setModal]         = useState(null)
+  const [error, setError]         = useState('')
+  const [scanning, setScanning]   = useState(false)
 
-  useEffect(() => {
-    async function load() {
+  const phaseRef   = useRef('loading')
+  const batchIdRef = useRef(null)
+  useEffect(() => { phaseRef.current = phase }, [phase])
+
+  async function loadState(silent = false) {
+    try {
       const active = await loadActivePaintBatch(employee.employee_id, stage)
       if (active) {
-        setBatch(active); setJobs(active.paint_batch_jobs ?? [])
+        const isNew = batchIdRef.current !== active.batch_id
+        batchIdRef.current = active.batch_id
         const members = (active.paint_batch_members ?? []).filter(m => m.stage === stage)
           .map(m => ({ employee_id: m.employee_id, full_name: m.employees?.full_name ?? m.employee_id }))
-        setTeam(members.length ? members : [{ employee_id: employee.employee_id, full_name: employee.full_name }])
-        const t = await getPaintBatchStartTime(active.batch_id)
-        setStartedAt(t); setPhase('active'); return
+        if (isNew) {
+          setBatch(active); setJobs(active.paint_batch_jobs ?? [])
+          setTeam(members.length ? members : [{ employee_id: employee.employee_id, full_name: employee.full_name }])
+          const t = await getPaintBatchStartTime(active.batch_id)
+          setStartedAt(t); setPhase(t ? 'active' : 'setup')
+        } else {
+          if (members.length) setTeam(members)
+        }
+        return
       }
-      const avail = await loadAvailablePaintBatches(stage)
-      setAvailable(avail); setPhase('queue')
-    }
-    load().catch(() => setPhase('queue'))
+      if (phaseRef.current === 'queue' || !silent) {
+        const avail = await loadAvailablePaintBatches(stage)
+        setAvailable(avail)
+        if (!silent) setPhase('queue')
+      }
+    } catch { if (!silent) setPhase('queue') }
+  }
+
+  useEffect(() => {
+    loadState()
+    const id = setInterval(() => loadState(true), 6000)
+    return () => clearInterval(id)
   }, [employee.employee_id, stage])
 
   async function refreshQueue() {
@@ -756,6 +814,7 @@ function StageView({ employee, stage }) {
   }
 
   function handleClaim(b) {
+    batchIdRef.current = b.batch_id
     setBatch(b); setJobs(b.paint_batch_jobs ?? [])
     setTeam([{ employee_id: employee.employee_id, full_name: employee.full_name }])
     setPhase('setup')
@@ -767,6 +826,7 @@ function StageView({ employee, stage }) {
       const member = await findTeamMember(raw)
       if (!member) { setError(`Badge not recognised: "${raw}"`); return }
       if (team.find(m => m.employee_id === member.employee_id)) { setError(`${member.full_name} already on team.`); return }
+      if (batch?.batch_id) await addBatchMember(batch.batch_id, member.employee_id, stage)
       setTeam(prev => [...prev, { employee_id: member.employee_id, full_name: member.full_name }])
     } catch { setError('Could not look up badge.') }
     finally { setScanning(false) }
@@ -783,13 +843,16 @@ function StageView({ employee, stage }) {
 
   async function handleCompleteConfirm() {
     setModal(null)
+    setPhase('loading')
     try {
       const memberIds = team.map(m => m.employee_id)
       await completePaintBatchStage(batch.batch_id, stage, memberIds, jobs)
+      batchIdRef.current = null
       setBatch(null); setJobs([]); setStartedAt(null)
       setTeam([{ employee_id: employee.employee_id, full_name: employee.full_name }])
-      await refreshQueue(); setPhase('queue')
-    } catch { setError('Failed to complete.') }
+      await refreshQueue()
+      setPhase('queue')
+    } catch { setError('Failed to complete.'); setPhase('active') }
   }
 
   if (phase === 'loading') return <div className="flex-1 flex items-center justify-center"><p className="text-stone-500 animate-pulse">Loading…</p></div>
