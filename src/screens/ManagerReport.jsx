@@ -131,6 +131,7 @@ function ManagerActionModal({ action, onClose, onDone }) {
   // Assembly job-level actions
   function handleHoldAssembly(reason) {
     const activeIds = members.filter(m => m.lastEvent === 'START' || m.lastEvent === 'RESUME').map(m => m.employee_id)
+    console.log('[Hold] job_id:', job.job_id, 'lineId:', lineId, 'members:', members, 'activeIds:', activeIds)
     run(() => holdAssemblyJob(job.job_id, lineId, reason, activeIds))
   }
   function handleResumeAssembly() {
@@ -147,6 +148,7 @@ function ManagerActionModal({ action, onClose, onDone }) {
     setBusyMember(member.employee_id); setError('')
     try {
       const currentlyActive = member.lastEvent === 'START' || member.lastEvent === 'RESUME'
+      console.log('[Toggle] emp:', member.employee_id, 'job:', job.job_id, 'line:', lineId, 'active:', currentlyActive, 'localMembers:', localMembers)
       await managerToggleAssemblyMember(member.employee_id, job.job_id, lineId, currentlyActive, localMembers)
       setLocalMembers(prev => prev.map(m =>
         m.employee_id === member.employee_id
