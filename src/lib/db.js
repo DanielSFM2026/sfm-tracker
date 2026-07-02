@@ -835,18 +835,34 @@ export async function managerToggleAssemblyMember(employeeId, jobId, lineId, cur
 
 // ── Manager live report ───────────────────────────────────────────────────────
 
-export async function loadManagerReport() {
-  const { data: rows, error } = await supabase
-    .from('job_events')
-    .select(`
-      event_id, job_id, employee_id, event_type, hold_reason, line_id, split_count, event_timestamp,
-      jobs ( job_id, po_number, part_number, quantity, status ),
-      employees ( employee_id, full_name, department, sub_department, active )
-    `)
-    .in('event_type', ['START','PAUSE','RESUME','COMPLETE','AUTO_LOGOUT'])
-    .order('event_timestamp', { ascending: true })
+// Supabase caps every response at 1000 rows regardless of .limit() — page
+// through with .range() to get the complete set. buildQuery must apply a
+// stable order (include a unique tiebreak column) or pages can overlap.
+async function fetchAllPages(buildQuery, { pageSize = 1000, maxRows = Infinity } = {}) {
+  let rows = []
+  for (let from = 0; rows.length < maxRows; from += pageSize) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1)
+    if (error) throw error
+    rows = rows.concat(data ?? [])
+    if (!data || data.length < pageSize) break
+  }
+  return rows
+}
 
-  if (error) throw error
+export async function loadManagerReport() {
+  const rows = await fetchAllPages(() =>
+    supabase
+      .from('job_events')
+      .select(`
+        event_id, job_id, employee_id, event_type, hold_reason, line_id, split_count, event_timestamp,
+        jobs ( job_id, po_number, part_number, quantity, status ),
+        employees ( employee_id, full_name, department, sub_department, active )
+      `)
+      .in('event_type', ['START','PAUSE','RESUME','COMPLETE','AUTO_LOGOUT'])
+      .order('event_timestamp', { ascending: true })
+      .order('event_id', { ascending: true })
+  )
+
   if (!rows?.length) return { individual: {}, assembly: {} }
 
   const empMap = new Map()
@@ -1236,18 +1252,19 @@ export async function completePaintBatchStage(batchId, stage, memberIds, batchJo
 
 // Load completed job events with employee and job info, optionally filtered by date range
 export async function loadJobHistory({ fromDate, toDate, department } = {}) {
-  let q = supabase
-    .from('job_events')
-    .select('event_id, event_type, event_timestamp, split_count, employee_id, job_id, batch_id, employees(full_name, department, sub_department), jobs(job_id, po_number, part_number, quantity, department)')
-    .in('event_type', ['START', 'PAUSE', 'RESUME', 'COMPLETE'])
-    .order('event_timestamp', { ascending: false })
+  const data = await fetchAllPages(() => {
+    let q = supabase
+      .from('job_events')
+      .select('event_id, event_type, event_timestamp, split_count, employee_id, job_id, batch_id, employees(full_name, department, sub_department), jobs(job_id, po_number, part_number, quantity, department)')
+      .in('event_type', ['START', 'PAUSE', 'RESUME', 'COMPLETE'])
+      .order('event_timestamp', { ascending: false })
+      .order('event_id', { ascending: false })
 
-  if (fromDate) q = q.gte('event_timestamp', fromDate)
-  if (toDate)   q = q.lte('event_timestamp', toDate)
-  if (department) q = q.eq('jobs.department', department)
-
-  const { data, error } = await q.limit(2000)
-  if (error) throw error
+    if (fromDate) q = q.gte('event_timestamp', fromDate)
+    if (toDate)   q = q.lte('event_timestamp', toDate)
+    if (department) q = q.eq('jobs.department', department)
+    return q
+  }, { maxRows: 10000 })
 
   // Group all events by job_id+employee_id pair
   const pairs = new Map()
