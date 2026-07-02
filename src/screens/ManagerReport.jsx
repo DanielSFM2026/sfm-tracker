@@ -1026,18 +1026,25 @@ export default function ManagerReport({ onBack }) {
 
   async function refresh() {
     setError('')
+    console.log('[Refresh] starting at', new Date().toISOString())
     try {
       const [data, rules, lineList] = await Promise.all([
         loadManagerReport(),
         fetchBreakRules(),
         fetchAssemblyLines()
       ])
+      console.log('[Refresh] assembly keys:', Object.keys(data.assembly))
+      for (const [lid, jobs] of Object.entries(data.assembly)) {
+        jobs.forEach(j => {
+          console.log(`  Line ${lid} job ${j.job.job_id} isActive=${j.isActive} members:`, j.members.map(m => `${m.employee_id}→${m.lastEvent}`))
+        })
+      }
       setReport(data)
       setBreakRules(rules)
       setLines(lineList)
       setLastRefresh(new Date())
     } catch (err) {
-      console.error(err)
+      console.error('[Refresh] error:', err)
       setError('Could not load data — check connection.')
     } finally {
       setLoading(false)
