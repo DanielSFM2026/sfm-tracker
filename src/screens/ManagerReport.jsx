@@ -1252,7 +1252,11 @@ export default function ManagerReport({ onBack }) {
 
             {/* ── Assembly ─────────────────────────────────────────────── */}
             {(() => {
-              const asmLines = Object.entries(report.assembly).sort(([a], [b]) => Number(a) - Number(b))
+              const asmLines = Object.entries(report.assembly).sort(([a], [b]) => {
+                if (a === 'unassigned') return 1
+                if (b === 'unassigned') return -1
+                return Number(a) - Number(b)
+              })
               const totalActive = asmLines.reduce((sum, [, jobs]) => sum + jobs.filter(j => j.isActive).length, 0)
               return (
                 <div className="bg-stone-900 rounded-2xl border border-stone-700 border-t-2 border-t-emerald-500 overflow-hidden">
@@ -1275,7 +1279,9 @@ export default function ManagerReport({ onBack }) {
                           <div key={lineId} className="border-t border-stone-700/60">
                             <div className="flex items-center gap-2.5 px-4 py-2 bg-emerald-950/40">
                               <span className="text-xs font-bold text-emerald-300 uppercase tracking-widest">
-                                {lineMap[lineId] ?? `Line ${lineId}`}
+                                  {lineId === 'unassigned'
+                                  ? 'No Line'
+                                  : lineMap[lineId] ?? `Line ${lineId}`}
                               </span>
                               <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
                                 activeJobs > 0 ? 'bg-emerald-500/20 text-emerald-400'
@@ -1289,7 +1295,8 @@ export default function ManagerReport({ onBack }) {
                             </div>
                             {jobs.map((entry, i) => (
                               <AssemblyJobRow key={i} entry={entry} breakRules={breakRules}
-                                lineId={lineId} lineName={lineMap[lineId] ?? `Line ${lineId}`}
+                                lineId={entry.lineId ?? null}
+                                lineName={entry.lineId != null ? (lineMap[entry.lineId] ?? `Line ${entry.lineId}`) : 'No Line'}
                                 onAction={setActionModal} />
                             ))}
                           </div>

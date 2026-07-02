@@ -860,14 +860,15 @@ export async function loadManagerReport() {
     const dept = emp.department
 
     if (dept === 'assembly') {
-      if (!row.line_id) continue
-      const key = `${row.line_id}_${row.job_id}`
+      const key = String(row.job_id)
       if (!asmMap.has(key)) {
         asmMap.set(key, {
           job:      row.jobs,
-          lineId:   row.line_id,
+          lineId:   row.line_id ?? null,
           empData:  new Map()   // empId → { full_name, events[], lastEvent }
         })
+      } else if (row.line_id != null && asmMap.get(key).lineId == null) {
+        asmMap.get(key).lineId = row.line_id
       }
       const entry = asmMap.get(key)
       if (!entry.empData.has(emp.employee_id)) {
@@ -922,7 +923,8 @@ export async function loadManagerReport() {
 
   const assembly = {}
   for (const { job, lineId, empData } of asmMap.values()) {
-    if (!assembly[lineId]) assembly[lineId] = []
+    const groupKey = lineId != null ? String(lineId) : 'unassigned'
+    if (!assembly[groupKey]) assembly[groupKey] = []
     const members = [...empData.values()]
     if (!members.length) continue
 
@@ -939,8 +941,9 @@ export async function loadManagerReport() {
 
     const activeTeam = members.filter(m => m.lastEvent === 'START' || m.lastEvent === 'RESUME')
 
-    assembly[lineId].push({
+    assembly[groupKey].push({
       job,
+      lineId,        // actual lineId (number or null) — used by action handlers
       members,       // all members with individual events arrays — used for total time calc
       isActive: anyActive,
       holdReason: lastPauseEv?.hold_reason ?? null,
