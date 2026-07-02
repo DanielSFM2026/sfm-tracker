@@ -8,10 +8,11 @@ import KittingDashboard   from './screens/KittingDashboard'
 import ManagerReport      from './screens/ManagerReport'
 
 const DEPT_SCREEN = {
-  weld:     DashboardScreen,
-  assembly: AssemblyDashboard,
-  paint:    PaintDashboard,
-  kitting:  KittingDashboard,
+  weld:           DashboardScreen,
+  assembly:       AssemblyDashboard,
+  paint:          PaintDashboard,
+  kitting:        KittingDashboard,
+  rubber_lining:  KittingDashboard,   // same scan-job flow as kitting for now
 }
 
 export default function App() {
