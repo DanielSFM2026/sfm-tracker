@@ -9,7 +9,7 @@ import {
 } from '../lib/db'
 import { calcElapsed, formatDuration, isJobActive, parseJobBarcode } from '../lib/timeCalc'
 
-const REFRESH_MS = 30_000
+const REFRESH_MS = 10_000
 
 const DEPT_LABEL = {
   weld:     'Weld Shop',
@@ -131,7 +131,6 @@ function ManagerActionModal({ action, onClose, onDone }) {
   // Assembly job-level actions
   function handleHoldAssembly(reason) {
     const activeIds = members.filter(m => m.lastEvent === 'START' || m.lastEvent === 'RESUME').map(m => m.employee_id)
-    console.log('[Hold] job_id:', job.job_id, 'lineId:', lineId, 'members:', members, 'activeIds:', activeIds)
     run(() => holdAssemblyJob(job.job_id, lineId, reason, activeIds))
   }
   function handleResumeAssembly() {
@@ -148,7 +147,6 @@ function ManagerActionModal({ action, onClose, onDone }) {
     setBusyMember(member.employee_id); setError('')
     try {
       const currentlyActive = member.lastEvent === 'START' || member.lastEvent === 'RESUME'
-      console.log('[Toggle] emp:', member.employee_id, 'job:', job.job_id, 'line:', lineId, 'active:', currentlyActive, 'localMembers:', localMembers)
       await managerToggleAssemblyMember(member.employee_id, job.job_id, lineId, currentlyActive, localMembers)
       setLocalMembers(prev => prev.map(m =>
         m.employee_id === member.employee_id
@@ -1026,25 +1024,18 @@ export default function ManagerReport({ onBack }) {
 
   async function refresh() {
     setError('')
-    console.log('[Refresh] starting at', new Date().toISOString())
     try {
       const [data, rules, lineList] = await Promise.all([
         loadManagerReport(),
         fetchBreakRules(),
         fetchAssemblyLines()
       ])
-      console.log('[Refresh] assembly keys:', Object.keys(data.assembly))
-      for (const [lid, jobs] of Object.entries(data.assembly)) {
-        jobs.forEach(j => {
-          console.log(`  Line ${lid} job ${j.job.job_id} isActive=${j.isActive} members:`, j.members.map(m => `${m.employee_id}→${m.lastEvent}`))
-        })
-      }
       setReport(data)
       setBreakRules(rules)
       setLines(lineList)
       setLastRefresh(new Date())
     } catch (err) {
-      console.error('[Refresh] error:', err)
+      console.error(err)
       setError('Could not load data — check connection.')
     } finally {
       setLoading(false)

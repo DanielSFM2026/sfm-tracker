@@ -131,7 +131,8 @@ export async function employeeHasCompletedJob(employeeId, jobId) {
 // ── Update jobs.status cache ──────────────────────────────────────────────────
 
 export async function setJobStatus(jobId, status) {
-  await supabase.from('jobs').update({ status }).eq('job_id', jobId)
+  const { error } = await supabase.from('jobs').update({ status }).eq('job_id', jobId)
+  if (error) console.warn('setJobStatus failed:', error)
 }
 
 // ── High-level job actions ────────────────────────────────────────────────────
@@ -849,7 +850,8 @@ export async function loadManagerReport() {
 
   for (const row of rows) {
     if (!row.jobs || !row.employees || !row.employees.active) continue
-    if (!['in_progress', 'paused'].includes(row.jobs.status)) continue
+    // Exclude completed jobs — derive from event log, not jobs.status which can lag
+    if (row.jobs.status === 'completed') continue
     const emp  = row.employees
     const dept = emp.department
 
