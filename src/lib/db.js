@@ -1143,6 +1143,28 @@ export async function addBatchMember(batchId, employeeId, stage) {
     .upsert({ batch_id: batchId, employee_id: employeeId, stage }, { onConflict: 'batch_id,employee_id,stage' })
 }
 
+// Add a member to an already-running batch — writes member record + START events from now
+export async function addActiveBatchMember(batchId, employeeId, stage, batchJobs) {
+  const now = new Date().toISOString()
+  const splitCount = Math.max(batchJobs.length, 1)
+
+  await supabase.from('paint_batch_members')
+    .upsert({ batch_id: batchId, employee_id: employeeId, stage }, { onConflict: 'batch_id,employee_id,stage' })
+
+  const events = batchJobs.map(bj => ({
+    employee_id:     employeeId,
+    job_id:          bj.job_id,
+    event_type:      'START',
+    event_timestamp: now,
+    split_count:     splitCount,
+    batch_id:        batchId,
+  }))
+  if (events.length) {
+    const { error } = await supabase.from('job_events').insert(events)
+    if (error) throw error
+  }
+}
+
 export async function startPaintBatchStage(batchId, stage, memberIds, batchJobs) {
   const now = new Date().toISOString()
   const splitCount = Math.max(batchJobs.length, 1)

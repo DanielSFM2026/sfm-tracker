@@ -12,6 +12,7 @@ import {
   startPaintBatchStage,
   completePaintBatchStage,
   addBatchMember,
+  addActiveBatchMember,
   findTeamMember,
 } from '../lib/db'
 import { parseJobBarcode, formatDuration } from '../lib/timeCalc'
@@ -244,12 +245,27 @@ function AvailableBatchCard({ batch, prevStage, onClaim }) {
 }
 
 // ── Active batch panel (timer + complete button) ──────────────────────────────
-function ActiveBatchPanel({ batch, jobs: jobsProp, stage, startedAt, team, onComplete }) {
-  const elapsed = useElapsed(startedAt)
-  const colour  = STAGE_COLOUR[stage]
-  const border  = STAGE_BORDER[stage]
-  const bg      = STAGE_BG[stage]
-  const jobs    = jobsProp ?? batch.paint_batch_jobs ?? []
+function ActiveBatchPanel({ batch, jobs: jobsProp, stage, startedAt, team, onComplete, onAddMember }) {
+  const elapsed  = useElapsed(startedAt)
+  const colour   = STAGE_COLOUR[stage]
+  const border   = STAGE_BORDER[stage]
+  const bg       = STAGE_BG[stage]
+  const jobs     = jobsProp ?? batch.paint_batch_jobs ?? []
+  const teamSize = Math.max(1, team.length)
+  const [scanning, setScanning] = useState(false)
+  const [scanErr,  setScanErr]  = useState('')
+
+  async function handleBadgeScan(raw) {
+    setScanning(true); setScanErr('')
+    try {
+      const member = await findTeamMember(raw)
+      if (!member) { setScanErr(`Badge not recognised: "${raw}"`); return }
+      if (team.find(m => m.employee_id === member.employee_id)) { setScanErr(`${member.full_name} already on team.`); return }
+      await addActiveBatchMember(batch.batch_id, member.employee_id, stage, jobs)
+      onAddMember(member)
+    } catch { setScanErr('Could not look up badge — check connection.') }
+    finally { setScanning(false) }
+  }
 
   return (
     <div className={`rounded-2xl border-2 ${border} overflow-hidden`}>
@@ -258,22 +274,34 @@ function ActiveBatchPanel({ batch, jobs: jobsProp, stage, startedAt, team, onCom
           <p className={`text-xs font-semibold uppercase tracking-widest ${colour}`}>
             {STAGE_LABEL[stage]} · {batch.booth_number ? `Booth ${batch.booth_number}` : `Batch #${batch.batch_number}`}
           </p>
-          <p className="text-stone-400 text-sm mt-0.5">{jobs.length} job{jobs.length !== 1 ? 's' : ''}</p>
+          <p className="text-stone-400 text-sm mt-0.5">
+            {jobs.length} job{jobs.length !== 1 ? 's' : ''} · {teamSize} worker{teamSize !== 1 ? 's' : ''}
+          </p>
         </div>
-        <p className={`text-3xl font-mono font-bold tabular-nums ${colour}`}>
-          {formatDuration(elapsed)}
-        </p>
+        <div className="text-right">
+          <p className={`text-3xl font-mono font-bold tabular-nums ${colour}`}>
+            {formatDuration(elapsed * teamSize)}
+          </p>
+          {teamSize > 1 && (
+            <p className="text-xs text-stone-500 mt-0.5">{formatDuration(elapsed)} × {teamSize}</p>
+          )}
+        </div>
       </div>
 
       <div className="bg-stone-800 px-5 py-4 space-y-4">
         <JobList jobs={jobs} />
 
-        {team.length > 0 && (
-          <div>
-            <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Team</p>
-            <TeamChips members={team} />
-          </div>
-        )}
+        <div>
+          <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Team</p>
+          <TeamChips members={team} />
+          {scanErr && <p className="text-red-400 text-xs mt-2">{scanErr}</p>}
+          <TeamBadgeScan
+            team={team}
+            onScan={handleBadgeScan}
+            scanning={scanning}
+            accentClass={`focus:border-${stage === 'blast' ? 'orange' : stage === 'prep' ? 'yellow' : stage === 'paint' ? 'red' : 'emerald'}-400`}
+          />
+        </div>
 
         <button className="btn-green w-full py-4 text-lg mt-2" onClick={onComplete}>
           ✓ Complete {STAGE_LABEL[stage]}
@@ -445,6 +473,7 @@ function BlastView({ employee, onLogout, resetInactivity }) {
               startedAt={startedAt}
               team={team}
               onComplete={handleComplete}
+              onAddMember={m => setTeam(prev => [...prev, m])}
             />
           ) : (
             <div className="bg-stone-800 border-2 border-orange-500/40 rounded-2xl overflow-hidden">
@@ -677,7 +706,8 @@ function PrepView({ employee }) {
 
       {phase === 'active' && (
         <ActiveBatchPanel batch={batch} jobs={jobs} stage="prep" startedAt={startedAt} team={team}
-          onComplete={() => setModal({ type: 'confirm_complete' })} />
+          onComplete={() => setModal({ type: 'confirm_complete' })}
+          onAddMember={m => setTeam(prev => [...prev, m])} />
       )}
 
       {phase === 'setup' && (
@@ -863,7 +893,8 @@ function StageView({ employee, stage }) {
 
       {phase === 'active' && (
         <ActiveBatchPanel batch={batch} jobs={jobs} stage={stage} startedAt={startedAt} team={team}
-          onComplete={() => setModal({ type: 'confirm_complete' })} />
+          onComplete={() => setModal({ type: 'confirm_complete' })}
+          onAddMember={m => setTeam(prev => [...prev, m])} />
       )}
 
       {phase === 'setup' && (
