@@ -850,15 +850,19 @@ async function fetchAllPages(buildQuery, { pageSize = 1000, maxRows = Infinity }
 }
 
 export async function loadManagerReport() {
+  // !inner joins + filters keep the payload small forever: completed jobs'
+  // events stop being fetched, so the 10s poll doesn't grow with table size
   const rows = await fetchAllPages(() =>
     supabase
       .from('job_events')
       .select(`
         event_id, job_id, employee_id, event_type, hold_reason, line_id, split_count, event_timestamp,
-        jobs ( job_id, po_number, part_number, quantity, status ),
-        employees ( employee_id, full_name, department, sub_department, active )
+        jobs!inner ( job_id, po_number, part_number, quantity, status ),
+        employees!inner ( employee_id, full_name, department, sub_department, active )
       `)
       .in('event_type', ['START','PAUSE','RESUME','COMPLETE','AUTO_LOGOUT'])
+      .or('status.is.null,status.neq.completed', { referencedTable: 'jobs' })
+      .eq('employees.active', true)
       .order('event_timestamp', { ascending: true })
       .order('event_id', { ascending: true })
   )
