@@ -807,19 +807,21 @@ export async function managerStartWorkerOnJob(employeeId, jobId, lineId, startTi
 export async function managerToggleAssemblyMember(employeeId, jobId, lineId, currentlyActive, allJobMembers) {
   const now = new Date().toISOString()
   if (currentlyActive) {
-    await supabase.from('job_events').insert({
+    const { error: e1 } = await supabase.from('job_events').insert({
       employee_id: employeeId, job_id: jobId, event_type: 'PAUSE',
-      line_id: lineId, split_count: 1, event_timestamp: now
+      line_id: lineId ?? null, split_count: 1, event_timestamp: now
     })
+    if (e1) throw e1
     const othersActive = allJobMembers.some(m =>
       m.employee_id !== employeeId && (m.lastEvent === 'START' || m.lastEvent === 'RESUME')
     )
     if (!othersActive) await setJobStatus(jobId, 'paused')
   } else {
-    await supabase.from('job_events').insert({
+    const { error: e2 } = await supabase.from('job_events').insert({
       employee_id: employeeId, job_id: jobId, event_type: 'RESUME',
-      line_id: lineId, split_count: 1, event_timestamp: now
+      line_id: lineId ?? null, split_count: 1, event_timestamp: now
     })
+    if (e2) throw e2
     await setJobStatus(jobId, 'in_progress')
   }
   // Rebalance so Ivan's time is split evenly across all his active assembly jobs
