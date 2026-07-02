@@ -114,17 +114,16 @@ function ManagerActionModal({ action, onClose, onDone }) {
   function handlePauseWorker() {
     run(async () => {
       await pauseJob(emp.employee_id, job.job_id)
-      await rebalanceEmployeeSplit(emp.employee_id)
+      await rebalanceEmployeeSplit(emp.employee_id, job.job_id)
     })
   }
   function handleResumeWorker() {
     run(() => resumeJob(emp.employee_id, job.job_id))
   }
-  // Complete then rebalance split (other jobs go from ÷2 back to ÷1)
   function handleCompleteWorker() {
     run(async () => {
       await completeJob(emp.employee_id, job.job_id)
-      await rebalanceEmployeeSplit(emp.employee_id)
+      await rebalanceEmployeeSplit(emp.employee_id, job.job_id)
     })
   }
 

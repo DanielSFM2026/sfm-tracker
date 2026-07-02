@@ -500,7 +500,7 @@ export async function addTeamMemberToJob(employeeId, jobId, lineId, splitCount =
 
 export async function removeTeamMemberFromJob(employeeId, jobId, lineId) {
   const result = await insertEvent({ employee_id: employeeId, job_id: jobId, event_type: 'PAUSE', line_id: lineId, split_count: 1 })
-  await rebalanceEmployeeSplit(employeeId)
+  await rebalanceEmployeeSplit(employeeId, jobId)
   return result
 }
 
@@ -703,15 +703,19 @@ export async function onManagerLineEnd(managerId) {
 }
 
 // ── Rebalance split_count for all remaining active jobs of an employee ─────────
-// Used after manager pause/complete on a weld/paint/kitting worker so that
-// their remaining jobs go from e.g. split=2 → split=1 automatically.
-export async function rebalanceEmployeeSplit(employeeId) {
-  const { data: rows } = await supabase
+// excludeJobId: job that was just paused/completed — excluded from the query
+// so a Supabase replica-lag race condition can't re-activate it.
+export async function rebalanceEmployeeSplit(employeeId, excludeJobId = null) {
+  let query = supabase
     .from('job_events')
     .select('job_id, event_type, activity_type, work_type, line_id')
     .eq('employee_id', employeeId)
     .in('event_type', ['START','RESUME','PAUSE','COMPLETE'])
     .order('event_timestamp', { ascending: true })
+
+  if (excludeJobId) query = query.neq('job_id', excludeJobId)
+
+  const { data: rows } = await query
   if (!rows?.length) return
 
   const jobStates = new Map()
@@ -825,8 +829,8 @@ export async function managerToggleAssemblyMember(employeeId, jobId, lineId, cur
     if (e2) throw e2
     await setJobStatus(jobId, 'in_progress')
   }
-  // Rebalance so Ivan's time is split evenly across all his active assembly jobs
-  await rebalanceEmployeeSplit(employeeId)
+  // Rebalance remaining jobs — exclude this one to avoid replica-lag race condition
+  await rebalanceEmployeeSplit(employeeId, jobId)
 }
 
 // ── Manager live report ───────────────────────────────────────────────────────
