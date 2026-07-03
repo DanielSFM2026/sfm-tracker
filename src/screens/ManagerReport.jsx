@@ -8,6 +8,7 @@ import {
   loadJobHistory, loadJobEvents, updateEventTimestamp, deleteJobEvent, addJobEvent,
 } from '../lib/db'
 import { calcElapsed, formatDuration, isJobActive, parseJobBarcode } from '../lib/timeCalc'
+import { HOLD_REASONS, HOLD_REASON_LABEL } from '../lib/constants'
 
 const REFRESH_MS      = 10_000   // change-probe cadence (tiny request)
 const FULL_REFRESH_MS = 60_000   // full reload at least this often
@@ -25,19 +26,17 @@ const SUB_DEPT_LABEL = {
   prep:  'Prep',
 }
 
+// Short display labels for the live view; falls back to HOLD_REASON_LABEL
+// (constants.js is the single source of truth for the pickable reasons)
 const HOLD_SHORT = {
   missing_parts_sfm:          'Missing Parts (SFM)',
   poor_quality_sfm:           'Poor Quality (SFM)',
   missing_parts_supply_chain: 'Missing Parts (Supply Chain)',
   poor_quality_supply_chain:  'Poor Quality (Supply Chain)',
+  CLOCKED_OUT:                'Clocked Out',
 }
 
-const HOLD_REASONS = [
-  { key: 'missing_parts_sfm',          label: 'Missing Parts (SFM)' },
-  { key: 'poor_quality_sfm',           label: 'Poor Quality (SFM)' },
-  { key: 'missing_parts_supply_chain', label: 'Missing Parts (Supply Chain)' },
-  { key: 'poor_quality_supply_chain',  label: 'Poor Quality (Supply Chain)' },
-]
+const holdLabel = key => HOLD_SHORT[key] ?? HOLD_REASON_LABEL[key] ?? key
 
 // ── Manager action modal ──────────────────────────────────────────────────────
 function ManagerActionModal({ action, onClose, onDone }) {
@@ -112,9 +111,9 @@ function ManagerActionModal({ action, onClose, onDone }) {
   }
 
   // Weld/Paint/Kitting: pause then rebalance split on remaining jobs
-  function handlePauseWorker() {
+  function handlePauseWorker(reason = null) {
     run(async () => {
-      await pauseJob(emp.employee_id, job.job_id)
+      await pauseJob(emp.employee_id, job.job_id, reason)
       await rebalanceEmployeeSplit(emp.employee_id, job.job_id)
     })
   }
@@ -278,19 +277,27 @@ function ManagerActionModal({ action, onClose, onDone }) {
           </div>
         )}
 
-        {/* Hold reason picker */}
+        {/* Hold/pause reason picker */}
         {holdStep ? (
           <>
-            <p className="text-stone-400 text-sm mb-3">Select hold reason:</p>
+            <p className="text-stone-400 text-sm mb-3">Select {isAssembly ? 'hold' : 'pause'} reason:</p>
             <div className="space-y-2 mb-4">
               {HOLD_REASONS.map(r => (
                 <button key={r.key} disabled={busy}
                   className="w-full text-left px-4 py-3 rounded-xl bg-stone-700 hover:bg-orange-900/40
                              border border-stone-600 hover:border-orange-700 text-stone-200 text-sm"
-                  onClick={() => handleHoldAssembly(r.key)}>
+                  onClick={() => isAssembly ? handleHoldAssembly(r.key) : handlePauseWorker(r.key)}>
                   {r.label}
                 </button>
               ))}
+              {!isAssembly && (
+                <button disabled={busy}
+                  className="w-full text-left px-4 py-3 rounded-xl bg-stone-700/50 hover:bg-stone-700
+                             border border-stone-600 text-stone-400 text-sm"
+                  onClick={() => handlePauseWorker(null)}>
+                  Other / Just Pause
+                </button>
+              )}
             </div>
             <button className="w-full text-sm text-stone-500 underline" onClick={() => setHoldStep(false)}>Back</button>
           </>
@@ -323,7 +330,7 @@ function ManagerActionModal({ action, onClose, onDone }) {
                 <>
                   <button disabled={busy}
                     className="w-full py-3 rounded-xl border border-orange-700 bg-orange-950/40 text-orange-400 text-base"
-                    onClick={handlePauseWorker}>
+                    onClick={() => setHoldStep(true)}>
                     ⏸ Pause Job
                   </button>
                   <button disabled={busy}
@@ -687,7 +694,7 @@ function WorkerRow({ emp, jobs, breakRules, onAction }) {
               PO {job.po_number} &nbsp;·&nbsp; {job.part_number}
               {job.holdReason && (
                 <span className="ml-2 text-orange-400 text-xs">
-                  ⏸ {HOLD_SHORT[job.holdReason] ?? job.holdReason}
+                  ⏸ {holdLabel(job.holdReason)}
                 </span>
               )}
             </p>
@@ -746,7 +753,7 @@ function AssemblyJobRow({ entry, breakRules, lineId, lineName, onAction }) {
           </p>
           {holdReason && (
             <p className="text-orange-400 text-xs mt-0.5">
-              ⏸ {HOLD_SHORT[holdReason] ?? holdReason}
+              ⏸ {holdLabel(holdReason)}
             </p>
           )}
         </div>
@@ -897,6 +904,9 @@ function EditTimestampsModal({ record, onClose, onSaved }) {
                   </button>
                 </div>
               </div>
+              {ev.hold_reason && (
+                <p className="text-xs text-orange-400/90 -mt-1 mb-2">{holdLabel(ev.hold_reason)}</p>
+              )}
               <div className="flex gap-2 items-center">
                 <input
                   type="datetime-local"

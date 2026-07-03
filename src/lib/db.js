@@ -1313,7 +1313,7 @@ export async function loadJobHistory({ fromDate, toDate, department } = {}) {
 export async function loadJobEvents(jobId, employeeId) {
   const { data, error } = await supabase
     .from('job_events')
-    .select('event_id, event_type, event_timestamp, split_count')
+    .select('event_id, event_type, event_timestamp, split_count, hold_reason')
     .eq('job_id', jobId)
     .eq('employee_id', employeeId)
     .order('event_timestamp', { ascending: true })
