@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 
-// ── Job alerts (assembly) ────────────────────────────────────────────────────
+// ── Job alerts (all departments) ─────────────────────────────────────────────
 export async function sendJobAlert({ jobId, employeeId, lineId, poNumber, partNumber, message, employeeName, lineName }) {
   // Store in DB
   await supabase.from('job_alerts').insert({

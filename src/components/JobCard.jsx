@@ -6,7 +6,7 @@ const WORK_LABEL     = { parts: 'Parts', frames: 'Frames', parts_frames: 'Parts 
 
 export default function JobCard({
   job, breakRules, splitMode, allJobs,
-  onResume, onPause, onEdit, onComplete
+  onResume, onPause, onEdit, onComplete, onAlert
 }) {
   const active = isJobActive(job.events)
 
@@ -93,6 +93,14 @@ export default function JobCard({
         <button className="btn-green flex-1" onClick={() => onComplete(job.job_id)}>
           ✓ Complete
         </button>
+        {onAlert && (
+          <button
+            className="px-4 rounded-xl border border-red-800 bg-red-950/40 text-red-400"
+            title="Report an issue"
+            onClick={() => onAlert(job)}>
+            ⚑
+          </button>
+        )}
       </div>
     </div>
   )

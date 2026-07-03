@@ -14,8 +14,10 @@ import {
   addBatchMember,
   addActiveBatchMember,
   findTeamMember,
+  sendJobAlert,
 } from '../lib/db'
 import { parseJobBarcode, formatDuration } from '../lib/timeCalc'
+import AlertModal from '../components/AlertModal'
 
 const INACTIVITY_MS = 75_000
 
@@ -245,15 +247,32 @@ function AvailableBatchCard({ batch, prevStage, onClaim }) {
 }
 
 // ── Active batch panel (timer + complete button) ──────────────────────────────
-function ActiveBatchPanel({ batch, jobs: jobsProp, stage, startedAt, team, onComplete, onAddMember }) {
+function ActiveBatchPanel({ batch, jobs: jobsProp, stage, startedAt, team, employee, onComplete, onAddMember }) {
   const elapsed  = useElapsed(startedAt)
   const colour   = STAGE_COLOUR[stage]
   const border   = STAGE_BORDER[stage]
   const bg       = STAGE_BG[stage]
   const jobs     = jobsProp ?? batch.paint_batch_jobs ?? []
   const teamSize = Math.max(1, team.length)
-  const [scanning, setScanning] = useState(false)
-  const [scanErr,  setScanErr]  = useState('')
+  const [scanning, setScanning]   = useState(false)
+  const [scanErr,  setScanErr]    = useState('')
+  const [alertOpen, setAlertOpen] = useState(false)
+
+  const whereLabel = `${STAGE_LABEL[stage]}${batch.booth_number ? ` · Booth ${batch.booth_number}` : ''}`
+  const jobRecords = jobs.map(bj => bj.jobs ?? bj)
+
+  async function handleAlertSend(message) {
+    await sendJobAlert({
+      jobId:        jobRecords[0]?.job_id ?? null,
+      employeeId:   employee.employee_id,
+      lineId:       null,
+      poNumber:     jobRecords.map(j => j.po_number).join(', '),
+      partNumber:   jobRecords.length === 1 ? jobRecords[0].part_number : `${jobRecords.length} jobs`,
+      message,
+      employeeName: employee.full_name,
+      lineName:     `Paint — ${STAGE_LABEL[stage]}${batch.booth_number ? ` (Booth ${batch.booth_number})` : ''}`,
+    })
+  }
 
   async function handleBadgeScan(raw) {
     setScanning(true); setScanErr('')
@@ -303,10 +322,26 @@ function ActiveBatchPanel({ batch, jobs: jobsProp, stage, startedAt, team, onCom
           />
         </div>
 
-        <button className="btn-green w-full py-4 text-lg mt-2" onClick={onComplete}>
-          ✓ Complete {STAGE_LABEL[stage]}
-        </button>
+        <div className="flex gap-3 mt-2">
+          <button className="btn-green flex-1 py-4 text-lg" onClick={onComplete}>
+            ✓ Complete {STAGE_LABEL[stage]}
+          </button>
+          <button
+            className="px-5 rounded-xl border border-red-800 bg-red-950/40 text-red-400 text-lg"
+            title="Report an issue"
+            onClick={() => setAlertOpen(true)}>
+            ⚑
+          </button>
+        </div>
       </div>
+
+      {alertOpen && (
+        <AlertModal
+          context={`${whereLabel} · ${jobRecords.map(j => `PO ${j.po_number}`).join(', ')}`}
+          onSend={handleAlertSend}
+          onCancel={() => setAlertOpen(false)}
+        />
+      )}
     </div>
   )
 }
@@ -472,6 +507,7 @@ function BlastView({ employee, onLogout, resetInactivity }) {
               stage="blast"
               startedAt={startedAt}
               team={team}
+              employee={employee}
               onComplete={handleComplete}
               onAddMember={m => setTeam(prev => [...prev, m])}
             />
@@ -706,6 +742,7 @@ function PrepView({ employee }) {
 
       {phase === 'active' && (
         <ActiveBatchPanel batch={batch} jobs={jobs} stage="prep" startedAt={startedAt} team={team}
+          employee={employee}
           onComplete={() => setModal({ type: 'confirm_complete' })}
           onAddMember={m => setTeam(prev => [...prev, m])} />
       )}
@@ -893,6 +930,7 @@ function StageView({ employee, stage }) {
 
       {phase === 'active' && (
         <ActiveBatchPanel batch={batch} jobs={jobs} stage={stage} startedAt={startedAt} team={team}
+          employee={employee}
           onComplete={() => setModal({ type: 'confirm_complete' })}
           onAddMember={m => setTeam(prev => [...prev, m])} />
       )}

@@ -6,9 +6,11 @@ import {
   resumeJob,
   completeJob,
   employeeHasCompletedJob,
+  sendJobAlert,
 } from '../lib/db'
 import { isJobActive, parseJobBarcode } from '../lib/timeCalc'
 import JobCard from '../components/JobCard'
+import AlertModal from '../components/AlertModal'
 
 const INACTIVITY_TIMEOUT_MS = 75_000
 
@@ -461,6 +463,7 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
               onResume={handleResumeClick}
               onEdit={handleEditClick}
               onComplete={handleCompleteClick}
+              onAlert={j => setModal({ type: 'alert', job: j })}
             />
           ))
         )}
@@ -503,6 +506,24 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
         <ConfirmModal
           job={modal.job}
           onConfirm={handleCompleteConfirm}
+          onCancel={() => setModal(null)}
+        />
+      )}
+      {modal?.type === 'alert' && (
+        <AlertModal
+          context={`Weld Shop · PO ${modal.job.po_number} · ${modal.job.part_number}`}
+          onSend={async (message) => {
+            await sendJobAlert({
+              jobId:        modal.job.job_id,
+              employeeId:   employee.employee_id,
+              lineId:       null,
+              poNumber:     modal.job.po_number,
+              partNumber:   modal.job.part_number,
+              message,
+              employeeName: employee.full_name,
+              lineName:     'Weld Shop',
+            })
+          }}
           onCancel={() => setModal(null)}
         />
       )}
