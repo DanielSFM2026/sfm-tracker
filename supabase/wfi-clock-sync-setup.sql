@@ -22,15 +22,20 @@ create table if not exists clock_swipes (
 
 -- 3. Schedule the sync every 2 minutes.
 --    Requires the pg_cron and pg_net extensions (Database → Extensions if this errors).
+--    NOTE: the URL uses the function's SLUG (from its dashboard URL), which the
+--    dashboard may auto-generate differently from its display name.
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
+
+-- Remove any previous schedule with this name, then (re)create it
+do $$ begin perform cron.unschedule('wfi-clock-sync'); exception when others then null; end $$;
 
 select cron.schedule(
   'wfi-clock-sync',
   '*/2 * * * *',
   $$
   select net.http_post(
-    url     := 'https://xofsdsmtvraoldznmrxf.supabase.co/functions/v1/wfi-clock-sync',
+    url     := 'https://xofsdsmtvraoldznmrxf.supabase.co/functions/v1/clever-handler',
     headers := jsonb_build_object(
       'Content-Type',  'application/json',
       'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhvZnNkc210dnJhb2xkem5tcnhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzMDM1MTUsImV4cCI6MjA5Nzg3OTUxNX0.UzACOGODLgCVgXTAAJcpBpG7805wCdvKrvX3leU8-Pw'

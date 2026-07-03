@@ -71,22 +71,45 @@ function cookieHeader(jar: Map<string, string>): string {
   return [...jar.entries()].map(([k, v]) => `${k}=${v}`).join('; ')
 }
 
+const BROWSER_HEADERS = {
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+  'origin': 'https://sfmengineering.workflowinfinity.com',
+  'referer': `${WFI_BASE}/login`
+}
+
 async function wfiLogin(username: string, password: string): Promise<Map<string, string>> {
   const jar = new Map<string, string>()
-  const page = await fetch(`${WFI_BASE}/login`, { redirect: 'manual' })
+  const page = await fetch(`${WFI_BASE}/login`, { redirect: 'manual', headers: BROWSER_HEADERS })
   collectCookies(page, jar)
   await page.body?.cancel()
 
   const body = new URLSearchParams({ redirect_on_success: '', passkey_json: '', username, password })
   const res = await fetch(`${WFI_BASE}/login/process`, {
     method: 'POST', body, redirect: 'manual',
-    headers: { cookie: cookieHeader(jar) }
+    headers: { ...BROWSER_HEADERS, cookie: cookieHeader(jar) }
   })
   collectCookies(res, jar)
-  await res.body?.cancel()
-  const loc = res.headers.get('location') ?? ''
-  if (res.status !== 302 || loc.includes('login')) {
-    throw new Error(`WFI login failed (status ${res.status}, redirected to ${loc || 'nowhere'})`)
+  const resText = res.status === 200 ? await res.text() : ((await res.body?.cancel()), '')
+
+  // Don't trust the redirect status — verify the session actually works
+  const check = await fetch(`${WFI_BASE}/data-explorer`, {
+    redirect: 'manual', headers: { ...BROWSER_HEADERS, cookie: cookieHeader(jar) }
+  })
+  collectCookies(check, jar)
+  const checkText = check.status === 200 ? await check.text() : ((await check.body?.cancel()), '')
+  const authed = check.status === 200 && !checkText.includes('Login | Workflow Infinity')
+  if (!authed) {
+    const strip = resText
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+    let hint = 'unrecognised response'
+    if (strip.includes('Invalid username/password')) hint = 'credentials rejected'
+    else if (/permissions do not cover/i.test(strip)) hint = 'user has no personnel range'
+    else if (/verif|two.?factor|2fa/i.test(strip)) hint = '2FA challenge'
+    else if (/no dashboard/i.test(strip)) hint = 'user has no dashboard assigned'
+    throw new Error(
+      `WFI login failed: ${hint} | login post=${res.status}, session check=${check.status} ` +
+      `loc=${check.headers.get('location') ?? '-'} | page said: ${strip.slice(0, 200)}`
+    )
   }
   return jar
 }
@@ -207,21 +230,34 @@ Deno.serve(async () => {
       if (t > (lastSwipeByPerson.get(r.wfi_id) ?? 0)) lastSwipeByPerson.set(r.wfi_id, t)
     }
 
+    // Swipes alternate in/out per person per day: 1st/3rd/5th... of the day
+    // is a clock-IN (resume-only), 2nd/4th... is a clock-OUT (pause-only).
+    // This makes phase mistakes impossible — an IN can never pause work.
+    // (Assumes no shifts spanning midnight.)
+    const byPerson = new Map<number, string[]>()
+    for (const s of swipes) {
+      if (!byPerson.has(s.wfiId)) byPerson.set(s.wfiId, [])
+      byPerson.get(s.wfiId)!.push(s.ts)
+    }
+
     let paused = 0, resumed = 0, processed = 0
     const notes: string[] = []
 
     for (const swipe of swipes) {
       const key = `${swipe.wfiId}|${swipe.ts}`
       if (done.has(key)) continue
+      done.add(key)
       processed++
       const swipeMs = new Date(swipe.ts).getTime()
       const sinceLast = swipeMs - (lastSwipeByPerson.get(swipe.wfiId) ?? 0)
       lastSwipeByPerson.set(swipe.wfiId, swipeMs)
+      const isIn = byPerson.get(swipe.wfiId)!.indexOf(swipe.ts) % 2 === 0
+      const dir = isIn ? 'in' : 'out'
 
-      let action = 'no_tracker_employee'
+      let action = `${dir}: no_tracker_employee`
 
       if (sinceLast < DEBOUNCE_MS) {
-        action = 'debounced'
+        action = `${dir}: debounced`
       } else {
         const { data: emps, error: empErr } = await sb
           .from('employees').select('employee_id, full_name')
@@ -236,7 +272,7 @@ Deno.serve(async () => {
           const active = eligible.filter(s => s.lastType === 'START' || s.lastType === 'RESUME')
           const clockedOut = eligible.filter(s => s.lastType === 'AUTO_LOGOUT' && s.lastHoldReason === 'CLOCKED_OUT')
 
-          if (active.length > 0) {
+          if (!isIn && active.length > 0) {
             for (const s of active) {
               const { error } = await sb.from('job_events').insert({
                 employee_id: emp.employee_id, job_id: s.job_id, event_type: 'AUTO_LOGOUT',
@@ -250,7 +286,7 @@ Deno.serve(async () => {
               paused++
             }
             acts.push(`paused ${active.length} (emp ${emp.employee_id})`)
-          } else if (clockedOut.length > 0) {
+          } else if (isIn && clockedOut.length > 0) {
             for (const s of clockedOut) {
               const { error } = await sb.from('job_events').insert({
                 employee_id: emp.employee_id, job_id: s.job_id, event_type: 'RESUME',
@@ -266,7 +302,7 @@ Deno.serve(async () => {
             acts.push(`no_action (emp ${emp.employee_id})`)
           }
         }
-        if (acts.length) action = acts.join('; ')
+        if (acts.length) action = `${dir}: ` + acts.join('; ')
       }
 
       const { error: insErr } = await sb.from('clock_swipes')
