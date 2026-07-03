@@ -849,6 +849,17 @@ async function fetchAllPages(buildQuery, { pageSize = 1000, maxRows = Infinity }
   return rows
 }
 
+// Change-detection probe for the manager view: events are insert-only, so the
+// row count changes whenever anything happens. head:true returns no body —
+// just headers — so polling this costs almost nothing.
+export async function fetchJobEventsCount() {
+  const { count, error } = await supabase
+    .from('job_events')
+    .select('event_id', { count: 'exact', head: true })
+  if (error) throw error
+  return count ?? 0
+}
+
 export async function loadManagerReport() {
   // !inner joins + filters keep the payload small forever: completed jobs'
   // events stop being fetched, so the 10s poll doesn't grow with table size

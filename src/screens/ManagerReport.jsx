@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  loadManagerReport, fetchBreakRules, fetchAssemblyLines,
+  loadManagerReport, fetchBreakRules, fetchAssemblyLines, fetchJobEventsCount,
   pauseJob, resumeJob, completeJob, rebalanceEmployeeSplit,
   holdAssemblyJob, managerResumeAssemblyJob, completeAssemblyJob, managerToggleAssemblyMember,
   fetchDepartmentEmployees, managerStartWorkerOnJob, managerStartAssemblyJobFull,
@@ -9,7 +9,8 @@ import {
 } from '../lib/db'
 import { calcElapsed, formatDuration, isJobActive, parseJobBarcode } from '../lib/timeCalc'
 
-const REFRESH_MS = 10_000
+const REFRESH_MS      = 10_000   // change-probe cadence (tiny request)
+const FULL_REFRESH_MS = 60_000   // full reload at least this often
 
 const DEPT_LABEL = {
   weld:     'Weld Shop',
@@ -1021,14 +1022,28 @@ export default function ManagerReport({ onBack }) {
   const [showAddJob, setShowAddJob]   = useState(false)
   const timerRef = useRef(null)
 
-  async function refresh() {
+  const lastCountRef = useRef(null)   // job_events row count at last full load
+  const lastFullRef  = useRef(0)      // when the last full load happened
+
+  async function refresh(force = false) {
     setError('')
     try {
+      // Cheap probe first: only download the full picture when something
+      // actually changed, or once a minute as a safety heartbeat
+      const count = await fetchJobEventsCount()
+      const changed   = count !== lastCountRef.current
+      const heartbeat = Date.now() - lastFullRef.current >= FULL_REFRESH_MS
+      if (!force && !changed && !heartbeat) {
+        setLastRefresh(new Date())    // confirmed up to date — probe only
+        return
+      }
       const [data, rules, lineList] = await Promise.all([
         loadManagerReport(),
         fetchBreakRules(),
         fetchAssemblyLines()
       ])
+      lastCountRef.current = count
+      lastFullRef.current  = Date.now()
       setReport(data)
       setBreakRules(rules)
       setLines(lineList)
@@ -1042,8 +1057,11 @@ export default function ManagerReport({ onBack }) {
   }
 
   useEffect(() => {
-    refresh()
-    timerRef.current = setInterval(refresh, REFRESH_MS)
+    refresh(true)
+    timerRef.current = setInterval(() => {
+      if (document.hidden) return   // tab in background — don't poll
+      refresh()
+    }, REFRESH_MS)
     return () => clearInterval(timerRef.current)
   }, [])
 
@@ -1315,14 +1333,14 @@ export default function ManagerReport({ onBack }) {
         <ManagerActionModal
           action={actionModal}
           onClose={() => setActionModal(null)}
-          onDone={() => { setActionModal(null); refresh() }}
+          onDone={() => { setActionModal(null); refresh(true) }}
         />
       )}
 
       {showAddJob && (
         <AddJobModal
           onClose={() => setShowAddJob(false)}
-          onDone={() => { setShowAddJob(false); refresh() }}
+          onDone={() => { setShowAddJob(false); refresh(true) }}
         />
       )}
     </div>
