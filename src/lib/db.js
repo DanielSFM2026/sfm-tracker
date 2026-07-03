@@ -166,11 +166,12 @@ export async function startNewJob(employeeId, jobId, wasCreated, activityType, w
 /**
  * Pause a job for this employee.
  */
-export async function pauseJob(employeeId, jobId) {
+export async function pauseJob(employeeId, jobId, holdReason = null) {
   const ev = await insertEvent({
     employee_id: employeeId,
     job_id:      jobId,
-    event_type:  'PAUSE'
+    event_type:  'PAUSE',
+    hold_reason: holdReason
   })
   await setJobStatus(jobId, 'paused')
   return ev
@@ -1326,5 +1327,26 @@ export async function updateEventTimestamp(eventId, newIsoTimestamp) {
     .from('job_events')
     .update({ event_timestamp: newIsoTimestamp })
     .eq('event_id', eventId)
+  if (error) throw error
+}
+
+// Delete a single event (manager corrections — e.g. a double-scan)
+export async function deleteJobEvent(eventId) {
+  const { error } = await supabase
+    .from('job_events')
+    .delete()
+    .eq('event_id', eventId)
+  if (error) throw error
+}
+
+// Insert a missed event (manager corrections — e.g. a forgotten pause)
+export async function addJobEvent({ jobId, employeeId, eventType, isoTimestamp }) {
+  const { error } = await supabase.from('job_events').insert({
+    job_id:          jobId,
+    employee_id:     employeeId,
+    event_type:      eventType,
+    split_count:     1,
+    event_timestamp: isoTimestamp
+  })
   if (error) throw error
 }

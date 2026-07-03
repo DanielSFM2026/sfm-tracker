@@ -5,7 +5,7 @@ import {
   holdAssemblyJob, managerResumeAssemblyJob, completeAssemblyJob, managerToggleAssemblyMember,
   fetchDepartmentEmployees, managerStartWorkerOnJob, managerStartAssemblyJobFull,
   findOrCreateJob, addTeamMemberToJob, employeeHasCompletedJob,
-  loadJobHistory, loadJobEvents, updateEventTimestamp,
+  loadJobHistory, loadJobEvents, updateEventTimestamp, deleteJobEvent, addJobEvent,
 } from '../lib/db'
 import { calcElapsed, formatDuration, isJobActive, parseJobBarcode } from '../lib/timeCalc'
 
@@ -785,6 +785,45 @@ function EditTimestampsModal({ record, onClose, onSaved }) {
   const [saving, setSaving]   = useState(null)   // eventId currently being saved
   const [editVal, setEditVal] = useState({})     // eventId → local datetime string
   const [error, setError]     = useState('')
+  const [deleteArm, setDeleteArm] = useState(null)  // eventId armed for delete (second tap confirms)
+  const [addType, setAddType] = useState('PAUSE')
+  const [addTime, setAddTime] = useState('')
+  const [adding, setAdding]   = useState(false)
+
+  async function reloadEvents() {
+    const evs = await loadJobEvents(record.job_id, record.employee_id)
+    setEvents(evs)
+    const defaults = {}
+    for (const ev of evs) defaults[ev.event_id] = toLocalInput(new Date(ev.event_timestamp))
+    setEditVal(defaults)
+  }
+
+  async function handleDelete(eventId) {
+    if (deleteArm !== eventId) { setDeleteArm(eventId); return }
+    setDeleteArm(null); setError('')
+    try {
+      await deleteJobEvent(eventId)
+      await reloadEvents()
+      onSaved()
+    } catch { setError('Failed to delete — check connection.') }
+  }
+
+  async function handleAdd() {
+    if (!addTime) return
+    setAdding(true); setError('')
+    try {
+      await addJobEvent({
+        jobId:        record.job_id,
+        employeeId:   record.employee_id,
+        eventType:    addType,
+        isoTimestamp: localInputToISO(addTime)
+      })
+      setAddTime('')
+      await reloadEvents()
+      onSaved()
+    } catch { setError('Failed to add event — check connection.') }
+    finally { setAdding(false) }
+  }
 
   useEffect(() => {
     loadJobEvents(record.job_id, record.employee_id)
@@ -843,9 +882,20 @@ function EditTimestampsModal({ record, onClose, onSaved }) {
                 <span className={`text-xs font-bold uppercase tracking-wide ${TYPE_COLOUR[ev.event_type] ?? 'text-stone-400'}`}>
                   {ev.event_type}
                 </span>
-                {ev.split_count > 1 && (
-                  <span className="text-xs text-stone-600">÷{ev.split_count}</span>
-                )}
+                <div className="flex items-center gap-3">
+                  {ev.split_count > 1 && (
+                    <span className="text-xs text-stone-600">÷{ev.split_count}</span>
+                  )}
+                  <button
+                    onClick={() => handleDelete(ev.event_id)}
+                    className={`text-xs px-2 py-1 rounded-lg border transition-colors ${
+                      deleteArm === ev.event_id
+                        ? 'bg-red-600/40 border-red-500 text-red-200 font-bold'
+                        : 'border-stone-700 text-stone-600 hover:text-red-400 hover:border-red-800'
+                    }`}>
+                    {deleteArm === ev.event_id ? 'Tap to confirm' : '✕'}
+                  </button>
+                </div>
               </div>
               <div className="flex gap-2 items-center">
                 <input
@@ -865,6 +915,35 @@ function EditTimestampsModal({ record, onClose, onSaved }) {
             </div>
           ))}
         </div>
+
+        {events && (
+          <div className="px-6 pb-4">
+            <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">Add missed event</p>
+            <div className="flex gap-2 items-center">
+              <select
+                value={addType}
+                onChange={e => setAddType(e.target.value)}
+                className="bg-stone-700 border border-stone-600 rounded-lg px-2 py-2 text-stone-100 text-sm outline-none">
+                <option value="START">START</option>
+                <option value="PAUSE">PAUSE</option>
+                <option value="RESUME">RESUME</option>
+                <option value="COMPLETE">COMPLETE</option>
+              </select>
+              <input
+                type="datetime-local"
+                value={addTime}
+                onChange={e => setAddTime(e.target.value)}
+                className="flex-1 bg-stone-700 border border-stone-600 focus:border-amber-500 rounded-lg px-3 py-2 text-stone-100 text-sm outline-none"
+              />
+              <button
+                disabled={adding || !addTime}
+                onClick={handleAdd}
+                className="bg-emerald-600/30 border border-emerald-600 text-emerald-300 text-xs px-3 py-2 rounded-lg hover:bg-emerald-600/50 transition-colors disabled:opacity-40">
+                {adding ? '…' : '+ Add'}
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="px-6 pb-6">
           <button className="btn-ghost w-full" onClick={onClose}>Close</button>

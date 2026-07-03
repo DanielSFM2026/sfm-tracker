@@ -11,6 +11,7 @@ import {
 import { isJobActive, parseJobBarcode } from '../lib/timeCalc'
 import JobCard from '../components/JobCard'
 import AlertModal from '../components/AlertModal'
+import PauseReasonModal from '../components/PauseReasonModal'
 
 const INACTIVITY_TIMEOUT_MS = 75_000
 
@@ -265,9 +266,9 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
   }
 
   // ── Card actions ────────────────────────────────────────────────────────────
-  async function handlePause(jobId) {
+  async function doPause(jobId, holdReason = null) {
     try {
-      const ev = await pauseJob(employee.employee_id, jobId)
+      const ev = await pauseJob(employee.employee_id, jobId, holdReason)
       appendEvent(jobId, ev)
 
       if (splitMode) {
@@ -285,6 +286,12 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
       console.error(err)
       setError('Pause failed.')
     }
+  }
+
+  function handlePause(jobId) {
+    // Split-mode Stop is job switching, not downtime — no reason prompt
+    if (splitMode) { doPause(jobId); return }
+    setModal({ type: 'pause_reason', jobId })
   }
 
   function handleResumeClick(jobId) {
@@ -506,6 +513,12 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
         <ConfirmModal
           job={modal.job}
           onConfirm={handleCompleteConfirm}
+          onCancel={() => setModal(null)}
+        />
+      )}
+      {modal?.type === 'pause_reason' && (
+        <PauseReasonModal
+          onConfirm={reason => { const id = modal.jobId; setModal(null); doPause(id, reason) }}
           onCancel={() => setModal(null)}
         />
       )}
