@@ -121,8 +121,10 @@ function ManagerActionModal({ action, onClose, onDone }) {
     run(() => resumeJob(emp.employee_id, job.job_id))
   }
   function handleCompleteWorker() {
+    // Manager complete = force-close the whole machine, even if the weld
+    // grid isn't fully covered (the manual override for stuck jobs)
     run(async () => {
-      await completeJob(emp.employee_id, job.job_id)
+      await completeJob(emp.employee_id, job.job_id, { force: true })
       await rebalanceEmployeeSplit(emp.employee_id, job.job_id)
     })
   }

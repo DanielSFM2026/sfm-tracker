@@ -197,14 +197,69 @@ export async function resumeJob(employeeId, jobId, activityType, workType, split
 /**
  * Complete a job for this employee.
  */
-export async function completeJob(employeeId, jobId) {
+// ── Weld completion grid ─────────────────────────────────────────────────────
+// A weld job (machine) is only fully complete once every activity × work-type
+// cell has been completed by someone: tack/weld × parts/frames. Each welder's
+// COMPLETE is tagged with their session selection ("Tack & Weld" covers both
+// activity cells, "Parts & Frames" both work cells); the machine closes itself
+// when the whole grid is covered. Managers can force-close (see force option).
+const WELD_CELLS = ['tack_parts', 'tack_frames', 'weld_parts', 'weld_frames']
+const expandActivity = a => a === 'tack_weld'    ? ['tack', 'weld']    : a ? [a] : []
+const expandWork     = w => w === 'parts_frames' ? ['parts', 'frames'] : w ? [w] : []
+
+export async function getWeldProgress(jobId) {
+  const { data, error } = await supabase
+    .from('job_events')
+    .select('activity_type, work_type')
+    .eq('job_id', jobId)
+    .eq('event_type', 'COMPLETE')
+  if (error) throw error
+  const done = new Set()
+  for (const ev of data ?? [])
+    for (const a of expandActivity(ev.activity_type))
+      for (const w of expandWork(ev.work_type))
+        done.add(`${a}_${w}`)
+  return {
+    done:      WELD_CELLS.filter(c => done.has(c)),
+    remaining: WELD_CELLS.filter(c => !done.has(c))
+  }
+}
+
+export async function completeJob(employeeId, jobId, { force = false } = {}) {
+  // Tag the COMPLETE with this worker's current session selection so the
+  // weld grid can be derived from the event log
+  const { data: lastSel } = await supabase
+    .from('job_events')
+    .select('activity_type, work_type')
+    .eq('employee_id', employeeId)
+    .eq('job_id', jobId)
+    .in('event_type', ['START', 'RESUME'])
+    .not('activity_type', 'is', null)
+    .order('event_timestamp', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
   const ev = await insertEvent({
-    employee_id: employeeId,
-    job_id:      jobId,
-    event_type:  'COMPLETE'
+    employee_id:   employeeId,
+    job_id:        jobId,
+    event_type:    'COMPLETE',
+    activity_type: lastSel?.activity_type ?? null,
+    work_type:     lastSel?.work_type ?? null
   })
+
+  const { data: job } = await supabase
+    .from('jobs').select('department').eq('job_id', jobId).maybeSingle()
+
+  // Weld machines only close when the whole grid is done (or manager forces it)
+  if (!force && job?.department === 'weld') {
+    const progress = await getWeldProgress(jobId)
+    if (progress.remaining.length > 0) {
+      return { event: ev, machineComplete: false, remaining: progress.remaining }
+    }
+  }
+
   await setJobStatus(jobId, 'completed')
-  return ev
+  return { event: ev, machineComplete: true, remaining: [] }
 }
 
 /**

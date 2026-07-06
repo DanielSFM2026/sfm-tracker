@@ -7,6 +7,7 @@ import {
   completeJob,
   employeeHasCompletedJob,
   sendJobAlert,
+  getWeldProgress,
 } from '../lib/db'
 import { isJobActive, parseJobBarcode } from '../lib/timeCalc'
 import JobCard from '../components/JobCard'
@@ -14,6 +15,27 @@ import AlertModal from '../components/AlertModal'
 import PauseReasonModal from '../components/PauseReasonModal'
 
 const INACTIVITY_TIMEOUT_MS = 75_000
+
+const CELL_LABEL = {
+  tack_parts:  'Tack · Parts',
+  tack_frames: 'Tack · Frames',
+  weld_parts:  'Weld · Parts',
+  weld_frames: 'Weld · Frames',
+}
+
+// Small "what's done / what's left" strip for a shared machine
+function MachineProgress({ progress }) {
+  if (!progress || progress.done.length === 0) return null
+  return (
+    <div className="mb-5 bg-stone-900/70 border border-stone-700 rounded-xl px-4 py-3 text-xs space-y-1">
+      <p className="text-stone-500 uppercase tracking-widest">Machine progress</p>
+      <p className="text-emerald-400">✓ {progress.done.map(c => CELL_LABEL[c]).join('   ')}</p>
+      {progress.remaining.length > 0 && (
+        <p className="text-stone-400">Left: {progress.remaining.map(c => CELL_LABEL[c]).join('   ')}</p>
+      )}
+    </div>
+  )
+}
 
 // ── Manual barcode entry modal ────────────────────────────────────────────────
 function ManualScanModal({ onSubmit, onCancel }) {
@@ -43,7 +65,7 @@ function ManualScanModal({ onSubmit, onCancel }) {
 }
 
 // ── Two-step action modal (Activity → Work type) ─────────────────────────────
-function JobActionModal({ onConfirm, onCancel }) {
+function JobActionModal({ onConfirm, onCancel, progress }) {
   const [step, setStep]             = useState(1)
   const [activityType, setActivity] = useState(null)
 
@@ -57,6 +79,7 @@ function JobActionModal({ onConfirm, onCancel }) {
       <div className="bg-stone-800 border border-stone-600 rounded-2xl p-8 w-full max-w-sm">
         {step === 1 ? (
           <>
+            <MachineProgress progress={progress} />
             <h2 className="text-2xl font-bold text-stone-100 mb-1 text-center">What are you doing?</h2>
             <p className="text-stone-400 text-center text-sm mb-6">Step 1 of 2</p>
             <div className="flex flex-col gap-4">
@@ -196,11 +219,14 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
       const { job, created } = await findOrCreateJob(parsed.poNumber, parsed.partNumber)
       const existing = jobs.find(j => j.job_id === job.job_id)
 
+      // What's already done on this machine (shared jobs) — shown in the modal
+      const progress = created ? null : await getWeldProgress(job.job_id).catch(() => null)
+
       // Warn if this employee has already completed this job
       if (!created && !existing) {
         const alreadyDone = await employeeHasCompletedJob(employee.employee_id, job.job_id)
         if (alreadyDone) {
-          setModal({ type: 'already_complete', job })
+          setModal({ type: 'already_complete', job, progress })
           return
         }
       }
@@ -210,7 +236,8 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
         action:     existing ? 'resume' : 'start',
         jobId:      job.job_id,
         wasCreated: created,
-        job
+        job,
+        progress
       })
     } catch (err) {
       console.error(err)
@@ -311,7 +338,7 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
     const jobId = modal.job.job_id
     setModal(null)
     try {
-      await completeJob(employee.employee_id, jobId)
+      const result = await completeJob(employee.employee_id, jobId)
       setJobs(prev => prev.filter(j => j.job_id !== jobId))
 
       if (splitMode) {
@@ -323,6 +350,12 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
           setSplitMode(false)
         }
       }
+
+      setModal({
+        type: 'complete_result',
+        machineComplete: result.machineComplete,
+        remaining: result.remaining
+      })
     } catch (err) {
       console.error(err)
       setError('Complete failed.')
@@ -492,6 +525,7 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
             <h2 className="text-lg font-bold text-stone-100 mb-2">Already Completed</h2>
             <p className="text-stone-400 text-sm mb-1">PO <strong className="text-stone-200">{modal.job.po_number}</strong></p>
             <p className="text-stone-400 text-sm mb-5">Part <strong className="text-stone-200">{modal.job.part_number}</strong></p>
+            <MachineProgress progress={modal.progress} />
             <p className="text-stone-400 text-sm mb-6">You've already completed this job. Do you want to continue working on it? Your previous time will be kept.</p>
             <div className="flex gap-3">
               <button className="flex-1 btn-secondary py-3" onClick={() => setModal(null)}>Cancel</button>
@@ -507,7 +541,31 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
         <JobActionModal
           onConfirm={handleActionConfirm}
           onCancel={() => setModal(null)}
+          progress={modal.progress}
         />
+      )}
+      {modal?.type === 'complete_result' && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-6">
+          <div className="bg-stone-800 border border-stone-600 rounded-2xl p-8 w-full max-w-sm text-center">
+            {modal.machineComplete ? (
+              <>
+                <p className="text-4xl mb-3">🏁</p>
+                <h2 className="text-2xl font-bold text-emerald-400 mb-2">Machine Complete!</h2>
+                <p className="text-stone-400 text-sm mb-6">All sections finished — this machine is done.</p>
+              </>
+            ) : (
+              <>
+                <p className="text-4xl mb-3">✓</p>
+                <h2 className="text-2xl font-bold text-stone-100 mb-2">Your Part is Logged</h2>
+                <p className="text-stone-400 text-sm mb-2">This machine still needs:</p>
+                <p className="text-amber-400 text-sm mb-6">
+                  {modal.remaining.map(c => CELL_LABEL[c]).join('  ·  ')}
+                </p>
+              </>
+            )}
+            <button className="btn-secondary w-full py-3" onClick={() => setModal(null)}>OK</button>
+          </div>
+        </div>
       )}
       {modal?.type === 'confirm' && (
         <ConfirmModal
