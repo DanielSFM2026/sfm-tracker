@@ -23,16 +23,32 @@ const CELL_LABEL = {
   weld_frames: 'Weld · Frames',
 }
 
+// One chip per grid cell — green when done, grey when still to do
+function CellChip({ label, done, tone = 'pending' }) {
+  const styles = {
+    done:    'bg-emerald-500/15 text-emerald-400 border-emerald-700',
+    pending: 'bg-stone-700/60 text-stone-400 border-stone-600',
+    needed:  'bg-amber-500/15 text-amber-400 border-amber-700',
+  }
+  return (
+    <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold border ${
+      done ? styles.done : styles[tone]
+    }`}>
+      {done ? '✓ ' : ''}{label}
+    </span>
+  )
+}
+
 // Small "what's done / what's left" strip for a shared machine
 function MachineProgress({ progress }) {
   if (!progress || progress.done.length === 0) return null
   return (
-    <div className="mb-5 bg-stone-900/70 border border-stone-700 rounded-xl px-4 py-3 text-xs space-y-1">
-      <p className="text-stone-500 uppercase tracking-widest">Machine progress</p>
-      <p className="text-emerald-400">✓ {progress.done.map(c => CELL_LABEL[c]).join('   ')}</p>
-      {progress.remaining.length > 0 && (
-        <p className="text-stone-400">Left: {progress.remaining.map(c => CELL_LABEL[c]).join('   ')}</p>
-      )}
+    <div className="mb-5 bg-stone-900/70 border border-stone-700 rounded-xl px-4 py-3 text-left">
+      <p className="text-stone-500 uppercase tracking-widest text-xs mb-2">Machine progress</p>
+      <div className="flex flex-wrap gap-1.5">
+        {progress.done.map(c => <CellChip key={c} label={CELL_LABEL[c]} done />)}
+        {progress.remaining.map(c => <CellChip key={c} label={CELL_LABEL[c]} />)}
+      </div>
     </div>
   )
 }
@@ -557,10 +573,12 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
               <>
                 <p className="text-4xl mb-3">✓</p>
                 <h2 className="text-2xl font-bold text-stone-100 mb-2">Your Part is Logged</h2>
-                <p className="text-stone-400 text-sm mb-2">This machine still needs:</p>
-                <p className="text-amber-400 text-sm mb-6">
-                  {modal.remaining.map(c => CELL_LABEL[c]).join('  ·  ')}
-                </p>
+                <p className="text-stone-400 text-sm mb-3">This machine still needs:</p>
+                <div className="flex flex-wrap gap-1.5 justify-center mb-6">
+                  {modal.remaining.map(c => (
+                    <CellChip key={c} label={CELL_LABEL[c]} tone="needed" />
+                  ))}
+                </div>
               </>
             )}
             <button className="btn-secondary w-full py-3" onClick={() => setModal(null)}>OK</button>
