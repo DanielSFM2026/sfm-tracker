@@ -241,9 +241,9 @@ function ManagerActionModal({ action, onClose, onDone }) {
           <p className="text-lg font-bold text-stone-100">PO {job.po_number}</p>
           <p className="text-sm text-stone-400">{job.part_number}</p>
           <span className={`inline-block mt-2 px-3 py-0.5 rounded-full text-xs font-semibold ${
-            isActive ? 'bg-amber-500/20 text-amber-400' : 'bg-orange-900/40 text-orange-400'
+            isActive ? 'bg-amber-500/20 text-amber-400' : action.holdReason === 'CLOCKED_OUT' ? 'bg-red-900/40 text-red-400' : 'bg-orange-900/40 text-orange-400'
           }`}>
-            {isActive ? 'Active' : 'Paused / On Hold'}
+            {isActive ? 'Active' : action.holdReason === 'CLOCKED_OUT' ? 'Clocked Out' : 'On Hold'}
           </span>
         </div>
 
@@ -695,8 +695,8 @@ function WorkerRow({ emp, jobs, breakRules, onAction }) {
             <p className="text-stone-400 text-sm truncate">
               PO {job.po_number} &nbsp;·&nbsp; {job.part_number}
               {job.holdReason && (
-                <span className="ml-2 text-orange-400 text-xs">
-                  ⏸ {holdLabel(job.holdReason)}
+                <span className={`ml-2 text-xs ${job.holdReason === 'CLOCKED_OUT' ? 'text-red-400' : 'text-orange-400'}`}>
+                  {job.holdReason === 'CLOCKED_OUT' ? '🕐' : '⏸'} {holdLabel(job.holdReason)}
                 </span>
               )}
             </p>
@@ -754,8 +754,8 @@ function AssemblyJobRow({ entry, breakRules, lineId, lineName, onAction }) {
             }
           </p>
           {holdReason && (
-            <p className="text-orange-400 text-xs mt-0.5">
-              ⏸ {holdLabel(holdReason)}
+            <p className={`text-xs mt-0.5 ${holdReason === 'CLOCKED_OUT' ? 'text-red-400' : 'text-orange-400'}`}>
+              {holdReason === 'CLOCKED_OUT' ? '🕐' : '⏸'} {holdLabel(holdReason)}
             </p>
           )}
         </div>
