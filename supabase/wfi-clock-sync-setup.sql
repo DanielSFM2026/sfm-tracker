@@ -40,10 +40,17 @@ select cron.schedule(
       'Content-Type',  'application/json',
       'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhvZnNkc210dnJhb2xkem5tcnhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzMDM1MTUsImV4cCI6MjA5Nzg3OTUxNX0.UzACOGODLgCVgXTAAJcpBpG7805wCdvKrvX3leU8-Pw'
     ),
-    body    := '{}'::jsonb
+    body    := '{}'::jsonb,
+    timeout_milliseconds := 30000
   );
   $$
 );
+
+-- Verify the schedule took (should list clever-handler):
+--   select jobid, jobname, schedule,
+--          substring(command from 'functions/v1/[a-zA-Z0-9_-]+') from cron.job;
+-- Verify calls are landing (want 200s every 2 min; NULL = timed out waiting):
+--   select status_code, created from net._http_response order by id desc limit 10;
 
 -- To pause the sync later:  select cron.unschedule('wfi-clock-sync');
 -- To watch what it's doing: select * from clock_swipes order by processed_at desc limit 50;
