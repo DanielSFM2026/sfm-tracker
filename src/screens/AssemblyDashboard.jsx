@@ -79,9 +79,9 @@ function LinePickerModal({ lines, job, onSelect, onCancel }) {
 }
 
 // ── Team edit modal (LM only — pick members from the department list) ─────────
-function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePermanently, onCancelJob, onClose }) {
+function TeamEditModal({ job, lineId, managerId, employees, onAdd, onClockOff, onRemovePermanently, onCancelJob, onClose }) {
   const [error, setError]         = useState('')
-  const [allEmployees, setAllEmployees] = useState(null)
+  const [allEmployees, setAllEmployees] = useState(employees ?? null)
   const [busyId, setBusyId]       = useState(null)
   const [removeArm, setRemoveArm] = useState(null)  // employee_id armed for permanent removal
   const [cancelArm, setCancelArm] = useState(false) // "cancel this job" armed for second tap
@@ -100,10 +100,11 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePerm
   )
 
   useEffect(() => {
+    if (employees) return  // dashboard pre-loaded the roster — instant open
     fetchDepartmentEmployees('assembly')
       .then(setAllEmployees)
       .catch(err => { console.error(err); setError('Could not load employee list.') })
-  }, [])
+  }, [employees])
 
   async function addMember(member) {
     setError(''); setBusyId(member.employee_id)
@@ -419,6 +420,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
   const [error, setError]       = useState('')
   const [scanning, setScanning] = useState(false)
   const [manualEntry, setManualEntry] = useState(false)
+  const [deptEmployees, setDeptEmployees] = useState(null)
   const [breakRules, setBreakRules] = useState(appBreakRules ?? [])
 
   const isLM     = !!employee.is_line_manager
@@ -458,10 +460,11 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
 
   useEffect(() => { if (!modal && isLM) scanRef.current?.focus() }, [modal])
 
-  // Load jobs + lines
+  // Load jobs + lines + department roster (pre-loaded so the team modal opens instantly)
   useEffect(() => {
     loadMyAssemblyJobs(employee.employee_id).then(setJobs).catch(console.error)
     fetchAssemblyLines().then(setLines).catch(console.error)
+    fetchDepartmentEmployees('assembly').then(setDeptEmployees).catch(console.error)
     if (!appBreakRules?.length) fetchBreakRules().then(setBreakRules).catch(console.error)
   }, [employee.employee_id])
 
@@ -835,6 +838,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
           job={teamModalJob}
           lineId={teamModalJob.line_id}
           managerId={employee.employee_id}
+          employees={deptEmployees}
           onAdd={handleTeamAdd}
           onClockOff={handleTeamClockToggle}
           onRemovePermanently={handleTeamRemovePermanently}

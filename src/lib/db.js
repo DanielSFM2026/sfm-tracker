@@ -116,8 +116,10 @@ export async function findOrCreateJob(poNumber, partNumber, department = 'weld')
   return { job: data, created: true }
 }
 
-// Abort a job that was just created by mistake: remove its events and the row
+// Fully delete a job: events, issue reports, paint-batch links, then the row
 export async function deleteCreatedJob(jobId) {
+  await supabase.from('job_alerts').delete().eq('job_id', jobId)
+  await supabase.from('paint_batch_jobs').delete().eq('job_id', jobId)
   await supabase.from('job_events').delete().eq('job_id', jobId)
   const { error } = await supabase.from('jobs').delete().eq('job_id', jobId)
   if (error) throw error
