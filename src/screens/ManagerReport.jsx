@@ -1003,6 +1003,8 @@ function HistoryView({ breakRules }) {
       return r.line_id != null ? (lineNames[r.line_id] ?? `Line ${r.line_id}`) : null
     }
     if (!r.sub_department) return null
+    const cat = /^cat\s*(\d+)$/i.exec(r.sub_department)
+    if (cat) return `CAT ${cat[1]}`
     return SUB_DEPT_LABEL[r.sub_department] ?? r.sub_department
   }
 
@@ -1150,7 +1152,16 @@ function HistoryView({ breakRules }) {
                           <div key={d}>
                             <p className={`text-xs font-bold uppercase mb-1 ${DEPT_COLOUR[d] ?? 'text-stone-400'}`}>{d}</p>
                             {g.depts.get(d).workers
-                              .sort((a, b) => b.ms - a.ms)
+                              .sort((a, b) => {
+                                if (d === 'paint') {
+                                  // Process flow order: blast → prep → paint → pack
+                                  const ORD = { blast: 0, prep: 1, paint: 2, pack: 3 }
+                                  const ao = ORD[a.record.sub_department] ?? 9
+                                  const bo = ORD[b.record.sub_department] ?? 9
+                                  if (ao !== bo) return ao - bo
+                                }
+                                return b.ms - a.ms
+                              })
                               .map(({ record, ms }) => (
                               <div key={`${record.job_id}_${record.employee_id}`} className="flex items-center justify-between py-1">
                                 <span className="text-sm text-stone-300 truncate">
