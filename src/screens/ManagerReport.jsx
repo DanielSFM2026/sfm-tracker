@@ -376,7 +376,7 @@ function ManagerActionModal({ action, onClose, onDone }) {
                   ? 'border-red-500 bg-red-600/30 text-red-200 font-bold'
                   : 'border-red-900/60 bg-red-950/20 text-red-400/80 hover:bg-red-950/40'
               }`}>
-              {deleteJobArm ? 'Tap again — deletes the job and ALL its time' : '🗑 Delete Job (test / mis-scan)'}
+              {deleteJobArm ? 'Tap again — deletes the job and ALL its time' : '🗑 Delete Job'}
             </button>
             <button className="w-full mt-2 text-sm text-stone-500 underline pt-1" onClick={onDone}>Close</button>
           </div>
