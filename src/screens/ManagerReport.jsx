@@ -1131,7 +1131,8 @@ function HistoryView({ breakRules }) {
                             </span>
                           </div>
                           <p className="text-stone-500 text-xs mb-2">Part: {g.part}</p>
-                          <div className="flex flex-wrap gap-1.5">
+                          {/* Dept chips: stacked on phones/scanners, one row on desktop */}
+                          <div className="flex flex-col items-start gap-1.5 sm:flex-row sm:flex-wrap">
                             {deptEntries.map(d => (
                               <span key={d} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-stone-800 border border-stone-700 text-xs">
                                 <span className={`font-bold uppercase ${DEPT_COLOUR[d] ?? 'text-stone-400'}`}>{d}</span>
@@ -1148,25 +1149,37 @@ function HistoryView({ breakRules }) {
                     </div>
                     {open && (
                       <div className="border-t border-stone-700 px-4 py-3 space-y-3 bg-stone-950/40">
-                        {deptEntries.map(d => (
+                        {deptEntries.map(d => {
+                          const workers = g.depts.get(d).workers
+                            .sort((a, b) => {
+                              if (d === 'paint') {
+                                // Process flow order: blast → prep → paint → pack
+                                const ORD = { blast: 0, prep: 1, paint: 2, pack: 3 }
+                                const ao = ORD[a.record.sub_department] ?? 9
+                                const bo = ORD[b.record.sub_department] ?? 9
+                                if (ao !== bo) return ao - bo
+                              }
+                              return b.ms - a.ms
+                            })
+                          return (
                           <div key={d}>
                             <p className={`text-xs font-bold uppercase mb-1 ${DEPT_COLOUR[d] ?? 'text-stone-400'}`}>{d}</p>
-                            {g.depts.get(d).workers
-                              .sort((a, b) => {
-                                if (d === 'paint') {
-                                  // Process flow order: blast → prep → paint → pack
-                                  const ORD = { blast: 0, prep: 1, paint: 2, pack: 3 }
-                                  const ao = ORD[a.record.sub_department] ?? 9
-                                  const bo = ORD[b.record.sub_department] ?? 9
-                                  if (ao !== bo) return ao - bo
-                                }
-                                return b.ms - a.ms
-                              })
-                              .map(({ record, ms }) => (
-                              <div key={`${record.job_id}_${record.employee_id}`} className="flex items-center justify-between py-1">
+                            {workers.map(({ record, ms }, i) => {
+                              // Subtle divider when the paint process changes
+                              const proc = record.sub_department
+                              const newProc = d === 'paint' && proc &&
+                                (i === 0 || workers[i - 1].record.sub_department !== proc)
+                              return (
+                              <div key={`${record.job_id}_${record.employee_id}`}>
+                                {newProc && (
+                                  <p className={`text-[10px] uppercase tracking-widest text-stone-600 ${i > 0 ? 'mt-2 pt-1.5 border-t border-stone-800' : ''}`}>
+                                    {SUB_DEPT_LABEL[proc] ?? proc}
+                                  </p>
+                                )}
+                                <div className="flex items-center justify-between py-1">
                                 <span className="text-sm text-stone-300 truncate">
                                   {record.full_name}
-                                  {recordTag(record) && (
+                                  {d !== 'paint' && recordTag(record) && (
                                     <span className="text-stone-500 text-xs ml-2">{recordTag(record)}</span>
                                   )}
                                   {!record.events.some(e => e.event_type === 'COMPLETE') && (
@@ -1178,10 +1191,11 @@ function HistoryView({ breakRules }) {
                                   <button onClick={e => { e.stopPropagation(); setEditing(record) }}
                                     className="text-xs text-amber-500 underline hover:text-amber-300">Edit</button>
                                 </span>
+                                </div>
                               </div>
-                            ))}
+                            )})}
                           </div>
-                        ))}
+                        )})}
                       </div>
                     )}
                   </div>
