@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  fetchAssemblyLines, loadMyAssemblyJobs, findOrCreateJob, findTeamMember,
+  fetchAssemblyLines, loadMyAssemblyJobs, findOrCreateJob,
   addTeamMemberToJob, removeTeamMemberFromJob, removeTeamMemberPermanently,
   startAssemblyJob, holdAssemblyJob, completeAssemblyJob, fetchBreakRules,
   prepareManagerLineStart, onManagerLineEnd, setJobStatus, sendJobAlert,
@@ -78,14 +78,12 @@ function LinePickerModal({ lines, job, onSelect, onCancel }) {
   )
 }
 
-// ── Team edit modal (LM only — pick from list or scan a badge) ────────────────
+// ── Team edit modal (LM only — pick members from the department list) ─────────
 function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePermanently, onClose }) {
-  const inputRef  = useRef(null)
-  const bufferRef = useRef('')
-  const [scanning, setScanning]   = useState(false)
   const [error, setError]         = useState('')
   const [allEmployees, setAllEmployees] = useState(null)
   const [busyId, setBusyId]       = useState(null)
+  const [removeArm, setRemoveArm] = useState(null)  // employee_id armed for permanent removal
 
   const visibleTeam = (job.team ?? []).filter(m => {
     const last = m.events?.[m.events.length - 1]
@@ -100,7 +98,6 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePerm
     !(job.team ?? []).some(m => m.employee_id === e.employee_id)
   )
 
-  useEffect(() => { if (inputRef.current) inputRef.current.focus() }, [])
   useEffect(() => {
     fetchDepartmentEmployees('assembly')
       .then(setAllEmployees)
@@ -140,37 +137,9 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePerm
     } finally { setBusyId(null) }
   }
 
-  async function handleScan(badgeCode) {
-    setError('')
-    if (!badgeCode) return
-    setScanning(true)
-    try {
-      const member = await findTeamMember(badgeCode)
-      if (!member) { setError(`Badge not recognised: ${badgeCode}`); return }
-      if (member.employee_id === managerId) { setError("That's your own badge."); return }
-
-      const existing = job.team?.find(m => m.employee_id === member.employee_id)
-      const lastEv   = existing?.events?.[existing.events.length - 1]
-
-      if (existing && lastEv?.event_type === 'COMPLETE') {
-        setError(`${member.full_name} has been permanently removed from this job.`)
-        return
-      }
-      if (existing) { await toggleMember(existing); return }
-      await addMember(member)
-    } catch (err) {
-      console.error(err)
-      setError('Could not look up badge — check connection.')
-    } finally {
-      setScanning(false)
-      bufferRef.current = ''
-      setTimeout(() => {
-        if (inputRef.current) { inputRef.current.value = ''; inputRef.current.focus() }
-      }, 50)
-    }
-  }
-
   async function handleRemovePermanently(member) {
+    if (removeArm !== member.employee_id) { setRemoveArm(member.employee_id); return }
+    setRemoveArm(null)
     try {
       const ev = await removeTeamMemberPermanently(member.employee_id, job.job_id, lineId)
       onRemovePermanently(job.job_id, member.employee_id, ev)
@@ -182,23 +151,35 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePerm
 
   function MemberRow({ member, label }) {
     const busy = busyId === member.employee_id
+    const isSelf = member.employee_id === managerId
+    const armed = removeArm === member.employee_id
     return (
-      <div className="flex items-center justify-between py-1.5 gap-2">
-        <span className={`text-sm flex-1 min-w-0 truncate ${label === 'on' ? 'text-stone-200' : 'text-stone-500'}`}>
-          {member.full_name}
+      <div className="flex items-center justify-between py-2 gap-2">
+        <span className={`text-base flex-1 min-w-0 truncate ${label === 'on' ? 'text-stone-200' : 'text-stone-500'}`}>
+          {member.full_name}{isSelf && <span className="text-stone-600 text-sm"> (you)</span>}
         </span>
-        <button disabled={busy} onClick={() => toggleMember(member)}
-          className={`text-xs px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-40 ${
-            label === 'on'
-              ? 'border-orange-800 text-orange-400 hover:bg-orange-900/30'
-              : 'border-emerald-800 text-emerald-400 hover:bg-emerald-900/30'
-          }`}>
-          {label === 'on' ? '⏸ Off' : '▶ On'}
-        </button>
-        <button disabled={busy} onClick={() => handleRemovePermanently(member)}
-          className="text-stone-600 hover:text-red-400 text-xs px-2 py-1 rounded transition-colors disabled:opacity-40">
-          ✕
-        </button>
+        {isSelf ? (
+          <span className="text-stone-600 text-xs pr-2">tap your chip on the card</span>
+        ) : (
+          <>
+            <button disabled={busy} onClick={() => toggleMember(member)}
+              className={`text-sm px-4 py-2.5 rounded-xl border transition-colors disabled:opacity-40 shrink-0 ${
+                label === 'on'
+                  ? 'border-orange-800 text-orange-400 hover:bg-orange-900/30'
+                  : 'border-emerald-800 text-emerald-400 hover:bg-emerald-900/30'
+              }`}>
+              {label === 'on' ? '⏸ Off' : '▶ On'}
+            </button>
+            <button disabled={busy} onClick={() => handleRemovePermanently(member)}
+              className={`text-sm px-4 py-2.5 rounded-xl border transition-colors disabled:opacity-40 shrink-0 ${
+                armed
+                  ? 'border-red-500 bg-red-600/30 text-red-200 font-bold'
+                  : 'border-stone-700 text-stone-500 hover:text-red-400 hover:border-red-800'
+              }`}>
+              {armed ? 'Sure?' : '✕'}
+            </button>
+          </>
+        )}
       </div>
     )
   }
@@ -214,24 +195,6 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePerm
           <button className="btn-ghost px-4 py-2" onClick={onClose}>Done</button>
         </div>
 
-        <input
-          ref={inputRef}
-          placeholder={scanning ? 'Looking up…' : '▌ Scan badge, or pick below'}
-          disabled={scanning}
-          inputMode="none"
-          className="w-full bg-stone-700 border border-stone-600 rounded-xl px-4 py-3
-                     text-stone-100 text-base outline-none placeholder-stone-500 mb-3 shrink-0"
-          autoComplete="off" autoCorrect="off" spellCheck={false}
-          onKeyDown={e => {
-            if (e.key === 'Enter') {
-              const v = bufferRef.current.trim()
-              bufferRef.current = ''
-              if (e.target) e.target.value = ''
-              if (v) handleScan(v)
-            }
-          }}
-          onInput={e => { bufferRef.current = e.target.value }}
-        />
         {error && <p className="text-red-400 text-sm mb-3 shrink-0">{error}</p>}
 
         <div className="overflow-y-auto min-h-0">
@@ -262,11 +225,11 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePerm
             <button key={e.employee_id}
               disabled={busyId === e.employee_id}
               onClick={() => addMember(e)}
-              className="w-full flex items-center justify-between py-2 px-3 mb-1 rounded-lg
+              className="w-full flex items-center justify-between py-3 px-4 mb-1.5 rounded-xl
                          bg-stone-700/50 hover:bg-emerald-900/30 border border-stone-700
                          hover:border-emerald-700 text-left transition-colors disabled:opacity-40">
-              <span className="text-sm text-stone-200">{e.full_name}</span>
-              <span className="text-emerald-400 text-sm font-bold">{busyId === e.employee_id ? '…' : '+'}</span>
+              <span className="text-base text-stone-200">{e.full_name}</span>
+              <span className="text-emerald-400 text-lg font-bold">{busyId === e.employee_id ? '…' : '+'}</span>
             </button>
           ))}
         </div>
