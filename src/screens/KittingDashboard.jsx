@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { findOrCreateJob, setJobStatus, completeJob } from '../lib/db'
+import { findOrCreateJob, setJobStatus, completeJob, cancelMyJob } from '../lib/db'
 import { parseJobBarcode, formatDuration } from '../lib/timeCalc'
 import { supabase } from '../lib/supabase'
 
@@ -48,7 +48,7 @@ function ConfirmCompleteModal({ job, onConfirm, onCancel }) {
   )
 }
 
-function KitCard({ job, onComplete }) {
+function KitCard({ job, onComplete, onCancel }) {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000)
@@ -72,11 +72,19 @@ function KitCard({ job, onComplete }) {
             {formatDuration(elapsed)}
           </span>
         )}
-        <button
-          onClick={() => onComplete(job)}
-          className="btn-green px-5 py-3 text-base">
-          ✓ Done
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => onCancel(job)}
+            title="Wrong scan — remove this kit"
+            className="px-4 py-3 rounded-xl border border-stone-700 text-stone-500 hover:text-red-400 hover:border-red-800 text-base">
+            ✕
+          </button>
+          <button
+            onClick={() => onComplete(job)}
+            className="btn-green px-5 py-3 text-base">
+            ✓ Done
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -183,6 +191,18 @@ export default function KittingDashboard({ employee, onLogout }) {
     }
   }
 
+  async function handleCancelJobConfirm() {
+    const { job } = modal
+    setModal(null)
+    try {
+      await cancelMyJob(job.job_id, employee.employee_id)
+      setJobs(prev => prev.filter(j => j.job_id !== job.job_id))
+    } catch (err) {
+      console.error(err)
+      setError('Cancel failed — check connection.')
+    }
+  }
+
   return (
     <div className="flex flex-col min-h-screen">
 
@@ -245,7 +265,9 @@ export default function KittingDashboard({ employee, onLogout }) {
           </div>
         ) : (
           jobs.map(job => (
-            <KitCard key={job.job_id} job={job} onComplete={job => setModal({ job })} />
+            <KitCard key={job.job_id} job={job}
+              onComplete={job => setModal({ job })}
+              onCancel={job => setModal({ job, cancel: true })} />
           ))
         )}
       </div>
@@ -256,12 +278,32 @@ export default function KittingDashboard({ employee, onLogout }) {
           onCancel={() => setShowManual(false)}
         />
       )}
-      {modal && (
+      {modal && !modal.cancel && (
         <ConfirmCompleteModal
           job={modal.job}
           onConfirm={handleCompleteConfirm}
           onCancel={() => setModal(null)}
         />
+      )}
+      {modal?.cancel && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-6">
+          <div className="bg-stone-800 border border-stone-600 rounded-2xl p-8 w-full max-w-sm text-center">
+            <h2 className="text-xl font-bold text-stone-100 mb-2">Remove This Kit?</h2>
+            <p className="text-stone-400 text-sm mb-1">PO <strong className="text-stone-200">{modal.job.po_number}</strong></p>
+            <p className="text-stone-400 text-sm mb-5">{modal.job.part_number}</p>
+            <p className="text-stone-500 text-sm mb-6">
+              Use this for a wrong scan — your time on it is discarded, not counted.
+            </p>
+            <div className="flex gap-3">
+              <button className="btn-ghost flex-1" onClick={() => setModal(null)}>Back</button>
+              <button
+                className="flex-1 py-3 rounded-xl bg-red-600/30 border border-red-600 text-red-200 font-semibold"
+                onClick={handleCancelJobConfirm}>
+                Remove ✕
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

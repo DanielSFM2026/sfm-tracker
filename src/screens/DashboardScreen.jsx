@@ -8,6 +8,7 @@ import {
   employeeHasCompletedJob,
   sendJobAlert,
   getWeldProgress,
+  deleteCreatedJob,
 } from '../lib/db'
 import { isJobActive, parseJobBarcode } from '../lib/timeCalc'
 import JobCard from '../components/JobCard'
@@ -556,7 +557,14 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
       {modal?.type === 'job_action' && (
         <JobActionModal
           onConfirm={handleActionConfirm}
-          onCancel={() => setModal(null)}
+          onCancel={() => {
+            const m = modal
+            setModal(null)
+            // Wrong scan on a brand-new job: remove the row it just created
+            if (m.action === 'start' && m.wasCreated) {
+              deleteCreatedJob(m.jobId).catch(console.error)
+            }
+          }}
           progress={modal.progress}
         />
       )}

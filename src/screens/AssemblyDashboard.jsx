@@ -4,7 +4,7 @@ import {
   addTeamMemberToJob, removeTeamMemberFromJob, removeTeamMemberPermanently,
   startAssemblyJob, holdAssemblyJob, completeAssemblyJob, fetchBreakRules,
   prepareManagerLineStart, onManagerLineEnd, setJobStatus, sendJobAlert,
-  fetchDepartmentEmployees
+  fetchDepartmentEmployees, deleteCreatedJob
 } from '../lib/db'
 import { isJobActive, calcElapsed, formatDuration } from '../lib/timeCalc'
 import { HOLD_REASONS } from '../lib/constants'
@@ -79,11 +79,12 @@ function LinePickerModal({ lines, job, onSelect, onCancel }) {
 }
 
 // ── Team edit modal (LM only — pick members from the department list) ─────────
-function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePermanently, onClose }) {
+function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePermanently, onCancelJob, onClose }) {
   const [error, setError]         = useState('')
   const [allEmployees, setAllEmployees] = useState(null)
   const [busyId, setBusyId]       = useState(null)
   const [removeArm, setRemoveArm] = useState(null)  // employee_id armed for permanent removal
+  const [cancelArm, setCancelArm] = useState(false) // "cancel this job" armed for second tap
 
   const visibleTeam = (job.team ?? []).filter(m => {
     const last = m.events?.[m.events.length - 1]
@@ -233,6 +234,18 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePerm
             </button>
           ))}
         </div>
+
+        {onCancelJob && (
+          <button
+            onClick={() => cancelArm ? onCancelJob() : setCancelArm(true)}
+            className={`w-full mt-3 py-3 rounded-xl border text-sm shrink-0 transition-colors ${
+              cancelArm
+                ? 'border-red-500 bg-red-600/30 text-red-200 font-bold'
+                : 'border-stone-700 text-stone-500 hover:text-red-400 hover:border-red-800'
+            }`}>
+            {cancelArm ? 'Tap again — job will be removed' : '✕ Wrong scan? Cancel this job'}
+          </button>
+        )}
       </div>
     </div>
   )
@@ -489,7 +502,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
         setModal({ type: 'job_exists_confirm', job })
         return
       }
-      setModal({ type: 'line_pick', job })
+      setModal({ type: 'line_pick', job, created: true })
     } catch (err) {
       console.error(err)
       setError('Failed to look up job — check connection.')
@@ -500,7 +513,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
 
   // ── Line picked → start job → open team modal ────────────────────────────────
   async function handleLineSelect(lineId) {
-    const { job } = modal
+    const { job, created } = modal
     setModal(null)
     try {
       const ev       = await startAssemblyJob(employee.employee_id, job.job_id, lineId)
@@ -525,10 +538,22 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
         })
       }
       setJobs(fresh)
-      setModal({ type: 'team', jobId: job.job_id })
+      setModal({ type: 'team', jobId: job.job_id, justStarted: !!created })
     } catch (err) {
       console.error(err)
       setError('Failed to start job.')
+    }
+  }
+
+  // Abort a job that was scanned/started by mistake (only offered right after creation)
+  async function handleCancelNewJob(jobId) {
+    setModal(null)
+    try {
+      await deleteCreatedJob(jobId)
+      setJobs(prev => prev.filter(j => j.job_id !== jobId))
+    } catch (err) {
+      console.error(err)
+      setError('Cancel failed — check connection.')
     }
   }
 
@@ -774,7 +799,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
             <p className="text-stone-400 text-sm mb-6">This job is already in the system. Do you want to continue working on it?</p>
             <div className="flex gap-3">
               <button className="flex-1 btn-secondary py-3" onClick={() => setModal(null)}>Cancel</button>
-              <button className="flex-1 btn-green py-3" onClick={() => setModal({ type: 'line_pick', job: modal.job })}>Continue</button>
+              <button className="flex-1 btn-green py-3" onClick={() => setModal({ type: 'line_pick', job: modal.job, created: false })}>Continue</button>
             </div>
           </div>
         </div>
@@ -784,7 +809,12 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
           lines={lines}
           job={modal.job}
           onSelect={handleLineSelect}
-          onCancel={() => setModal(null)}
+          onCancel={() => {
+            const m = modal
+            setModal(null)
+            // Wrong scan on a brand-new job: remove the row it just created
+            if (m.created) deleteCreatedJob(m.job.job_id).catch(console.error)
+          }}
         />
       )}
       {modal?.type === 'hold' && (
@@ -808,6 +838,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
           onAdd={handleTeamAdd}
           onClockOff={handleTeamClockToggle}
           onRemovePermanently={handleTeamRemovePermanently}
+          onCancelJob={modal.justStarted ? () => handleCancelNewJob(teamModalJob.job_id) : undefined}
           onClose={() => setModal(null)}
         />
       )}

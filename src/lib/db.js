@@ -116,6 +116,27 @@ export async function findOrCreateJob(poNumber, partNumber, department = 'weld')
   return { job: data, created: true }
 }
 
+// Abort a job that was just created by mistake: remove its events and the row
+export async function deleteCreatedJob(jobId) {
+  await supabase.from('job_events').delete().eq('job_id', jobId)
+  const { error } = await supabase.from('jobs').delete().eq('job_id', jobId)
+  if (error) throw error
+}
+
+// Worker backs out of a job they scanned by mistake: removes only their own
+// events; the job row goes too if nobody else has ever touched it
+export async function cancelMyJob(jobId, employeeId) {
+  const { error } = await supabase
+    .from('job_events').delete()
+    .eq('job_id', jobId).eq('employee_id', employeeId)
+  if (error) throw error
+  const { data } = await supabase
+    .from('job_events').select('event_id').eq('job_id', jobId).limit(1)
+  if (!data?.length) {
+    await supabase.from('jobs').delete().eq('job_id', jobId)
+  }
+}
+
 // Returns true if this employee has a COMPLETE event on the given job
 export async function employeeHasCompletedJob(employeeId, jobId) {
   const { data } = await supabase
