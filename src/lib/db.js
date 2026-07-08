@@ -1362,7 +1362,7 @@ export async function loadJobHistory({ fromDate, toDate, department } = {}) {
   const data = await fetchAllPages(() => {
     let q = supabase
       .from('job_events')
-      .select('event_id, event_type, event_timestamp, split_count, employee_id, job_id, batch_id, employees(full_name, department, sub_department), jobs(job_id, po_number, part_number, quantity, department)')
+      .select('event_id, event_type, event_timestamp, split_count, employee_id, job_id, batch_id, line_id, employees(full_name, department, sub_department), jobs(job_id, po_number, part_number, quantity, department)')
       .in('event_type', ['START', 'PAUSE', 'RESUME', 'COMPLETE'])
       .order('event_timestamp', { ascending: false })
       .order('event_id', { ascending: false })
@@ -1392,9 +1392,12 @@ export async function loadJobHistory({ fromDate, toDate, department } = {}) {
         full_name: ev.employees?.full_name,
         events: [],
         batch_id: ev.batch_id,
+        line_id: ev.line_id ?? null,
       })
     }
-    pairs.get(key).events.push(ev)
+    const pair = pairs.get(key)
+    if (pair.line_id == null && ev.line_id != null) pair.line_id = ev.line_id
+    pair.events.push(ev)
   }
 
   return [...pairs.values()]

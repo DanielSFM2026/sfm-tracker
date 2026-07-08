@@ -805,8 +805,9 @@ function Section({ title, badge, badgeColour = 'bg-stone-700 text-stone-300', ac
 // ── Edit timestamps modal ─────────────────────────────────────────────────────
 function EditTimestampsModal({ record, onClose, onSaved }) {
   const [events, setEvents]   = useState(null)
-  const [saving, setSaving]   = useState(null)   // eventId currently being saved
+  const [saving, setSaving]   = useState(false)  // saving all changes
   const [editVal, setEditVal] = useState({})     // eventId → local datetime string
+  const [origVal, setOrigVal] = useState({})     // eventId → value as loaded (change detection)
   const [error, setError]     = useState('')
   const [deleteArm, setDeleteArm] = useState(null)  // eventId armed for delete (second tap confirms)
   const [addType, setAddType] = useState('PAUSE')
@@ -819,7 +820,12 @@ function EditTimestampsModal({ record, onClose, onSaved }) {
     const defaults = {}
     for (const ev of evs) defaults[ev.event_id] = toLocalInput(new Date(ev.event_timestamp))
     setEditVal(defaults)
+    setOrigVal(defaults)
   }
+
+  const changedIds = events
+    ? events.map(ev => ev.event_id).filter(id => editVal[id] && editVal[id] !== origVal[id])
+    : []
 
   async function handleDelete(eventId) {
     if (deleteArm !== eventId) { setDeleteArm(eventId); return }
@@ -849,17 +855,7 @@ function EditTimestampsModal({ record, onClose, onSaved }) {
   }
 
   useEffect(() => {
-    loadJobEvents(record.job_id, record.employee_id)
-      .then(evs => {
-        setEvents(evs)
-        const defaults = {}
-        for (const ev of evs) {
-          const d = new Date(ev.event_timestamp)
-          defaults[ev.event_id] = toLocalInput(d)
-        }
-        setEditVal(defaults)
-      })
-      .catch(() => setError('Could not load events.'))
+    reloadEvents().catch(() => setError('Could not load events.'))
   }, [record.job_id, record.employee_id])
 
   function toLocalInput(date) {
@@ -871,18 +867,18 @@ function EditTimestampsModal({ record, onClose, onSaved }) {
     return `${y}-${mo}-${d}T${h}:${mi}`
   }
 
-  async function handleSave(eventId) {
-    const raw = editVal[eventId]
-    if (!raw) return
-    setSaving(eventId); setError('')
+  // One save for every edited row — the list only re-sorts once, after saving
+  async function handleSaveAll() {
+    if (!changedIds.length) return
+    setSaving(true); setError('')
     try {
-      await updateEventTimestamp(eventId, localInputToISO(raw))
-      // Refresh event list
-      const evs = await loadJobEvents(record.job_id, record.employee_id)
-      setEvents(evs)
+      for (const id of changedIds) {
+        await updateEventTimestamp(id, localInputToISO(editVal[id]))
+      }
+      await reloadEvents()
       onSaved()
     } catch { setError('Failed to save — check connection.') }
-    finally { setSaving(null) }
+    finally { setSaving(false) }
   }
 
   const TYPE_COLOUR = { START: 'text-emerald-400', RESUME: 'text-emerald-400', PAUSE: 'text-orange-400', COMPLETE: 'text-blue-400', AUTO_LOGOUT: 'text-red-400' }
@@ -923,21 +919,14 @@ function EditTimestampsModal({ record, onClose, onSaved }) {
               {ev.hold_reason && (
                 <p className="text-xs text-orange-400/90 -mt-1 mb-2">{holdLabel(ev.hold_reason)}</p>
               )}
-              <div className="flex gap-2 items-center">
-                <input
-                  type="datetime-local"
-                  value={editVal[ev.event_id] ?? ''}
-                  onChange={e => setEditVal(prev => ({ ...prev, [ev.event_id]: e.target.value }))}
-                  className="flex-1 bg-stone-700 border border-stone-600 focus:border-amber-500 rounded-lg px-3 py-2 text-stone-100 text-sm outline-none"
-                />
-                <button
-                  disabled={saving === ev.event_id}
-                  onClick={() => handleSave(ev.event_id)}
-                  className="bg-amber-600/30 border border-amber-600 text-amber-300 text-xs px-3 py-2 rounded-lg hover:bg-amber-600/50 transition-colors disabled:opacity-40"
-                >
-                  {saving === ev.event_id ? '…' : 'Save'}
-                </button>
-              </div>
+              <input
+                type="datetime-local"
+                value={editVal[ev.event_id] ?? ''}
+                onChange={e => setEditVal(prev => ({ ...prev, [ev.event_id]: e.target.value }))}
+                className={`w-full bg-stone-700 border rounded-lg px-3 py-2 text-stone-100 text-sm outline-none focus:border-amber-500 ${
+                  editVal[ev.event_id] !== origVal[ev.event_id] ? 'border-amber-500' : 'border-stone-600'
+                }`}
+              />
             </div>
           ))}
         </div>
@@ -971,8 +960,14 @@ function EditTimestampsModal({ record, onClose, onSaved }) {
           </div>
         )}
 
-        <div className="px-6 pb-6">
-          <button className="btn-ghost w-full" onClick={onClose}>Close</button>
+        <div className="px-6 pb-6 flex gap-3">
+          <button className="btn-ghost flex-1" onClick={onClose}>Close</button>
+          <button
+            disabled={saving || changedIds.length === 0}
+            onClick={handleSaveAll}
+            className="flex-1 bg-amber-600/30 border border-amber-600 text-amber-300 py-3 rounded-xl text-sm font-semibold hover:bg-amber-600/50 transition-colors disabled:opacity-40">
+            {saving ? 'Saving…' : changedIds.length ? `Save Changes (${changedIds.length})` : 'Save Changes'}
+          </button>
         </div>
       </div>
     </div>
@@ -994,6 +989,22 @@ function HistoryView({ breakRules }) {
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState('')
   const [editing,  setEditing]  = useState(null)
+  const [lineNames, setLineNames] = useState({})
+
+  useEffect(() => {
+    fetchAssemblyLines()
+      .then(ls => setLineNames(Object.fromEntries(ls.map(l => [l.line_id, l.line_name]))))
+      .catch(console.error)
+  }, [])
+
+  // Small context tag per worker record: weld CAT / paint process / assembly line
+  function recordTag(r) {
+    if (r.department === 'assembly') {
+      return r.line_id != null ? (lineNames[r.line_id] ?? `Line ${r.line_id}`) : null
+    }
+    if (!r.sub_department) return null
+    return SUB_DEPT_LABEL[r.sub_department] ?? r.sub_department
+  }
 
   const DEPT_OPTS = [
     { value: '', label: 'All Departments' },
@@ -1144,6 +1155,9 @@ function HistoryView({ breakRules }) {
                               <div key={`${record.job_id}_${record.employee_id}`} className="flex items-center justify-between py-1">
                                 <span className="text-sm text-stone-300 truncate">
                                   {record.full_name}
+                                  {recordTag(record) && (
+                                    <span className="text-stone-500 text-xs ml-2">{recordTag(record)}</span>
+                                  )}
                                   {!record.events.some(e => e.event_type === 'COMPLETE') && (
                                     <span className="text-amber-500 text-xs ml-2">● active</span>
                                   )}
