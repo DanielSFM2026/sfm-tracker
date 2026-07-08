@@ -1,5 +1,13 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 
+// Who receives ⚑ issue reports — edit this list and redeploy to change it
+const RECIPIENTS = [
+  'daniel@sfmengineering.co.uk',
+]
+
+// Requires the sfmengineering.co.uk domain to be Verified in Resend
+const FROM = 'SFM Job Tracker <alerts@sfmengineering.co.uk>'
+
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -16,11 +24,11 @@ serve(async (req) => {
       method:  'POST',
       headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from:    'SFM Tracker <onboarding@resend.dev>',
-        to:      ['daniel@sfmengineering.co.uk'],
-        subject: `⚠ Assembly Alert — ${lineName} · PO ${poNumber}`,
+        from:    FROM,
+        to:      RECIPIENTS,
+        subject: `⚑ Job Issue — ${lineName ?? 'Shop Floor'} · PO ${poNumber}`,
         html: `
-          <p><strong>Line:</strong> ${lineName}</p>
+          <p><strong>Area:</strong> ${lineName ?? '—'}</p>
           <p><strong>PO:</strong> ${poNumber} · ${partNumber}</p>
           <p><strong>Raised by:</strong> ${employeeName}</p>
           <p><strong>Message:</strong></p>
