@@ -3,7 +3,8 @@ import {
   fetchAssemblyLines, loadMyAssemblyJobs, findOrCreateJob, findTeamMember,
   addTeamMemberToJob, removeTeamMemberFromJob, removeTeamMemberPermanently,
   startAssemblyJob, holdAssemblyJob, completeAssemblyJob, fetchBreakRules,
-  prepareManagerLineStart, onManagerLineEnd, setJobStatus, sendJobAlert
+  prepareManagerLineStart, onManagerLineEnd, setJobStatus, sendJobAlert,
+  fetchDepartmentEmployees
 } from '../lib/db'
 import { isJobActive, calcElapsed, formatDuration } from '../lib/timeCalc'
 import { HOLD_REASONS } from '../lib/constants'
@@ -77,12 +78,14 @@ function LinePickerModal({ lines, job, onSelect, onCancel }) {
   )
 }
 
-// ── Team edit modal (LM only — add/remove members by scanning) ────────────────
+// ── Team edit modal (LM only — pick from list or scan a badge) ────────────────
 function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePermanently, onClose }) {
   const inputRef  = useRef(null)
   const bufferRef = useRef('')
-  const [scanning, setScanning] = useState(false)
-  const [error, setError]       = useState('')
+  const [scanning, setScanning]   = useState(false)
+  const [error, setError]         = useState('')
+  const [allEmployees, setAllEmployees] = useState(null)
+  const [busyId, setBusyId]       = useState(null)
 
   const visibleTeam = (job.team ?? []).filter(m => {
     const last = m.events?.[m.events.length - 1]
@@ -91,7 +94,51 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePerm
   const activeMembers     = visibleTeam.filter(m => isJobActive(m.events))
   const clockedOffMembers = visibleTeam.filter(m => !isJobActive(m.events))
 
+  // Everyone in assembly not already on (or permanently removed from) this job
+  const availableEmployees = (allEmployees ?? []).filter(e =>
+    e.employee_id !== managerId &&
+    !(job.team ?? []).some(m => m.employee_id === e.employee_id)
+  )
+
   useEffect(() => { if (inputRef.current) inputRef.current.focus() }, [])
+  useEffect(() => {
+    fetchDepartmentEmployees('assembly')
+      .then(setAllEmployees)
+      .catch(err => { console.error(err); setError('Could not load employee list.') })
+  }, [])
+
+  async function addMember(member) {
+    setError(''); setBusyId(member.employee_id)
+    try {
+      const ev = await addTeamMemberToJob(member.employee_id, job.job_id, lineId)
+      onAdd(job.job_id, {
+        employee_id:    member.employee_id,
+        full_name:      member.full_name,
+        badge_code:     member.badge_code,
+        is_line_manager: member.is_line_manager ?? false,
+        events: [ev]
+      })
+    } catch (err) {
+      console.error(err)
+      setError('Add failed — check connection.')
+    } finally { setBusyId(null) }
+  }
+
+  async function toggleMember(member) {
+    setError(''); setBusyId(member.employee_id)
+    try {
+      if (isJobActive(member.events)) {
+        const ev = await removeTeamMemberFromJob(member.employee_id, job.job_id, lineId)
+        onClockOff(job.job_id, member.employee_id, ev)
+      } else {
+        const ev = await addTeamMemberToJob(member.employee_id, job.job_id, lineId)
+        onClockOff(job.job_id, member.employee_id, ev)
+      }
+    } catch (err) {
+      console.error(err)
+      setError('Update failed — check connection.')
+    } finally { setBusyId(null) }
+  }
 
   async function handleScan(badgeCode) {
     setError('')
@@ -109,24 +156,8 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePerm
         setError(`${member.full_name} has been permanently removed from this job.`)
         return
       }
-      if (existing && isJobActive(existing.events)) {
-        const ev = await removeTeamMemberFromJob(member.employee_id, job.job_id, lineId)
-        onClockOff(job.job_id, member.employee_id, ev)
-        return
-      }
-      if (existing) {
-        const ev = await addTeamMemberToJob(member.employee_id, job.job_id, lineId)
-        onClockOff(job.job_id, member.employee_id, ev)
-        return
-      }
-      const ev = await addTeamMemberToJob(member.employee_id, job.job_id, lineId)
-      onAdd(job.job_id, {
-        employee_id:    member.employee_id,
-        full_name:      member.full_name,
-        badge_code:     member.badge_code,
-        is_line_manager: member.is_line_manager ?? false,
-        events: [ev]
-      })
+      if (existing) { await toggleMember(existing); return }
+      await addMember(member)
     } catch (err) {
       console.error(err)
       setError('Could not look up badge — check connection.')
@@ -150,14 +181,23 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePerm
   }
 
   function MemberRow({ member, label }) {
+    const busy = busyId === member.employee_id
     return (
-      <div className="flex items-center justify-between py-1.5">
-        <span className={`text-sm ${label === 'on' ? 'text-stone-200' : 'text-stone-500'}`}>
+      <div className="flex items-center justify-between py-1.5 gap-2">
+        <span className={`text-sm flex-1 min-w-0 truncate ${label === 'on' ? 'text-stone-200' : 'text-stone-500'}`}>
           {member.full_name}
         </span>
-        <button onClick={() => handleRemovePermanently(member)}
-          className="text-stone-600 hover:text-red-400 text-xs px-2 py-1 rounded transition-colors">
-          ✕ Remove
+        <button disabled={busy} onClick={() => toggleMember(member)}
+          className={`text-xs px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-40 ${
+            label === 'on'
+              ? 'border-orange-800 text-orange-400 hover:bg-orange-900/30'
+              : 'border-emerald-800 text-emerald-400 hover:bg-emerald-900/30'
+          }`}>
+          {label === 'on' ? '⏸ Off' : '▶ On'}
+        </button>
+        <button disabled={busy} onClick={() => handleRemovePermanently(member)}
+          className="text-stone-600 hover:text-red-400 text-xs px-2 py-1 rounded transition-colors disabled:opacity-40">
+          ✕
         </button>
       </div>
     )
@@ -165,8 +205,8 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePerm
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-6">
-      <div className="bg-stone-800 border border-stone-600 rounded-2xl p-6 w-full max-w-sm">
-        <div className="flex items-center justify-between mb-5">
+      <div className="bg-stone-800 border border-stone-600 rounded-2xl p-6 w-full max-w-sm max-h-[85vh] flex flex-col">
+        <div className="flex items-center justify-between mb-4 shrink-0">
           <div>
             <p className="text-xs text-stone-500 uppercase tracking-widest">Team — PO {job.po_number}</p>
             <p className="text-sm text-stone-400">{job.part_number}</p>
@@ -176,11 +216,11 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePerm
 
         <input
           ref={inputRef}
-          placeholder={scanning ? 'Looking up…' : '▌ Scan badge to add / toggle'}
+          placeholder={scanning ? 'Looking up…' : '▌ Scan badge, or pick below'}
           disabled={scanning}
           inputMode="none"
           className="w-full bg-stone-700 border border-stone-600 rounded-xl px-4 py-3
-                     text-stone-100 text-base outline-none placeholder-stone-500 mb-4"
+                     text-stone-100 text-base outline-none placeholder-stone-500 mb-3 shrink-0"
           autoComplete="off" autoCorrect="off" spellCheck={false}
           onKeyDown={e => {
             if (e.key === 'Enter') {
@@ -192,23 +232,44 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePerm
           }}
           onInput={e => { bufferRef.current = e.target.value }}
         />
-        {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+        {error && <p className="text-red-400 text-sm mb-3 shrink-0">{error}</p>}
 
-        {activeMembers.length > 0 && (
-          <div className="mb-3">
-            <p className="text-xs text-stone-500 uppercase tracking-widest mb-1">On shift</p>
-            {activeMembers.map(m => <MemberRow key={m.employee_id} member={m} label="on" />)}
-          </div>
-        )}
-        {clockedOffMembers.length > 0 && (
-          <div>
-            <p className="text-xs text-stone-500 uppercase tracking-widest mb-1">Clocked off</p>
-            {clockedOffMembers.map(m => <MemberRow key={m.employee_id} member={m} label="off" />)}
-          </div>
-        )}
-        {visibleTeam.length === 0 && (
-          <p className="text-stone-600 text-sm text-center py-2">No team members yet</p>
-        )}
+        <div className="overflow-y-auto min-h-0">
+          {activeMembers.length > 0 && (
+            <div className="mb-3">
+              <p className="text-xs text-stone-500 uppercase tracking-widest mb-1">On shift</p>
+              {activeMembers.map(m => <MemberRow key={m.employee_id} member={m} label="on" />)}
+            </div>
+          )}
+          {clockedOffMembers.length > 0 && (
+            <div className="mb-3">
+              <p className="text-xs text-stone-500 uppercase tracking-widest mb-1">Clocked off</p>
+              {clockedOffMembers.map(m => <MemberRow key={m.employee_id} member={m} label="off" />)}
+            </div>
+          )}
+          {visibleTeam.length === 0 && (
+            <p className="text-stone-600 text-sm text-center py-2">No team members yet</p>
+          )}
+
+          <p className="text-xs text-stone-500 uppercase tracking-widest mb-1 mt-2">Add member</p>
+          {allEmployees === null && (
+            <p className="text-stone-600 text-sm animate-pulse py-2">Loading employees…</p>
+          )}
+          {allEmployees !== null && availableEmployees.length === 0 && (
+            <p className="text-stone-600 text-sm py-2">Everyone's already on this job.</p>
+          )}
+          {availableEmployees.map(e => (
+            <button key={e.employee_id}
+              disabled={busyId === e.employee_id}
+              onClick={() => addMember(e)}
+              className="w-full flex items-center justify-between py-2 px-3 mb-1 rounded-lg
+                         bg-stone-700/50 hover:bg-emerald-900/30 border border-stone-700
+                         hover:border-emerald-700 text-left transition-colors disabled:opacity-40">
+              <span className="text-sm text-stone-200">{e.full_name}</span>
+              <span className="text-emerald-400 text-sm font-bold">{busyId === e.employee_id ? '…' : '+'}</span>
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )

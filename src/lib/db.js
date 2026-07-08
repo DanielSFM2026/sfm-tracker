@@ -817,7 +817,7 @@ export async function managerStartAssemblyJobFull(jobId, lineId, memberIds, star
 export async function fetchDepartmentEmployees(department) {
   const { data, error } = await supabase
     .from('employees')
-    .select('employee_id, full_name, department, sub_department')
+    .select('employee_id, full_name, badge_code, is_line_manager, department, sub_department')
     .eq('department', department)
     .eq('active', true)
     .order('full_name', { ascending: true })
