@@ -381,12 +381,27 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
   const [modal, setModal]       = useState(null)
   const [error, setError]       = useState('')
   const [scanning, setScanning] = useState(false)
+  const [manualEntry, setManualEntry] = useState(false)
   const [breakRules, setBreakRules] = useState(appBreakRules ?? [])
 
   const isLM     = !!employee.is_line_manager
   const scanRef  = useRef(null)
   const bufRef   = useRef('')
   const inactRef = useRef(null)
+
+  // Toggle the on-screen keyboard: scan guns need inputMode "none" so no
+  // keyboard pops, but phones need "text" to type a job number by hand
+  function toggleManualEntry() {
+    setManualEntry(m => !m)
+    setTimeout(() => { scanRef.current?.blur(); scanRef.current?.focus() }, 50)
+  }
+
+  function submitScanValue() {
+    const v = bufRef.current.trim()
+    bufRef.current = ''
+    if (scanRef.current) scanRef.current.value = ''
+    if (v) handleJobScan(v)
+  }
 
   // Inactivity logout
   const resetInactivity = useCallback(() => {
@@ -648,26 +663,43 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
 
       {/* Job scan input — all assembly users */}
       <div className="bg-stone-900/60 border-b border-stone-800 px-4 py-3">
+        <div className="flex gap-2">
           <input
             ref={scanRef}
             type="text"
-            inputMode="none"
-            placeholder={scanning ? 'Looking up job…' : '▌ Scan job barcode to start'}
+            inputMode={manualEntry ? 'text' : 'none'}
+            placeholder={scanning ? 'Looking up job…'
+              : manualEntry ? 'Type PO/PART then ✓'
+              : '▌ Scan job barcode to start'}
             disabled={scanning}
             autoComplete="off" autoCorrect="off" spellCheck={false}
-            className="w-full bg-stone-800 border border-stone-600 rounded-xl px-4 py-3
+            className="flex-1 min-w-0 bg-stone-800 border border-stone-600 rounded-xl px-4 py-3
                        text-stone-100 text-base outline-none placeholder-stone-600"
             onKeyDown={e => {
-              if (e.key === 'Enter') {
-                const v = bufRef.current.trim()
-                bufRef.current = ''
-                if (e.target) e.target.value = ''
-                if (v) handleJobScan(v)
-              }
+              if (e.key === 'Enter') submitScanValue()
             }}
             onInput={e => { bufRef.current = e.target.value }}
           />
+          {manualEntry && (
+            <button
+              className="btn-green px-4 shrink-0"
+              disabled={scanning}
+              onClick={submitScanValue}>
+              ✓
+            </button>
+          )}
+          <button
+            className={`px-4 rounded-xl border text-xl shrink-0 ${
+              manualEntry
+                ? 'border-amber-500 bg-amber-500/20 text-amber-300'
+                : 'border-stone-600 bg-stone-800 text-stone-400'
+            }`}
+            title="Type job number manually"
+            onClick={toggleManualEntry}>
+            ⌨
+          </button>
         </div>
+      </div>
 
       {error && (
         <div className="mx-4 mt-3 bg-red-900/40 border border-red-700 rounded-xl px-4 py-3 text-red-300 text-sm flex items-center justify-between">
