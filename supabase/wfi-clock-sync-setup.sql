@@ -38,7 +38,12 @@ select cron.schedule(
     url     := 'https://xofsdsmtvraoldznmrxf.supabase.co/functions/v1/clever-handler',
     headers := jsonb_build_object(
       'Content-Type',  'application/json',
-      'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhvZnNkc210dnJhb2xkem5tcnhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzMDM1MTUsImV4cCI6MjA5Nzg3OTUxNX0.UzACOGODLgCVgXTAAJcpBpG7805wCdvKrvX3leU8-Pw'
+      -- Key split into chunks so an editor line-wrap can't corrupt it
+      -- (a wrapped key caused silent 401s on every scheduled call, 2026-07-08)
+      'Authorization', 'Bearer '
+        || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.'
+        || 'eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhvZnNkc210dnJhb2xkem5tcnhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzMDM1MTUsImV4cCI6MjA5Nzg3OTUxNX0.'
+        || 'UzACOGODLgCVgXTAAJcpBpG7805wCdvKrvX3leU8-Pw'
     ),
     body    := '{}'::jsonb,
     timeout_milliseconds := 30000
