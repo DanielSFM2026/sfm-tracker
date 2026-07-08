@@ -1033,7 +1033,10 @@ export async function loadManagerReport() {
       lineId,        // actual lineId (number or null) — used by action handlers
       members,       // all members with individual events arrays — used for total time calc
       isActive: anyActive,
-      holdReason: lastPauseEv?.hold_reason ?? null,
+      // Only a hold reason when the job isn't active — mirrors the individual
+      // path (line ~1006). Otherwise a stale clock-out PAUSE from before a
+      // member resumed keeps flagging an active team job as "Clocked Out".
+      holdReason: anyActive ? null : (lastPauseEv?.hold_reason ?? null),
       team: activeTeam
     })
   }
