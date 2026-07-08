@@ -988,6 +988,9 @@ function HistoryView({ breakRules }) {
   const [toDate,   setToDate]   = useState(fmt(today))
   const [dept,     setDept]     = useState('')
   const [records,  setRecords]  = useState(null)
+  const [allRecords, setAllRecords] = useState(null)
+  const [mode,     setMode]     = useState('individual')  // 'individual' | 'by_job'
+  const [expanded, setExpanded] = useState(null)          // expanded job group key
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState('')
   const [editing,  setEditing]  = useState(null)
@@ -1006,7 +1009,8 @@ function HistoryView({ breakRules }) {
       const fromISO = fromDate ? new Date(fromDate + 'T00:00:00').toISOString() : undefined
       const toISO   = toDate   ? new Date(toDate   + 'T23:59:59').toISOString() : undefined
       const data = await loadJobHistory({ fromDate: fromISO, toDate: toISO, department: dept || undefined })
-      // Only keep records that have a COMPLETE event
+      setAllRecords(data)
+      // Individual view only keeps records that have a COMPLETE event
       const completed = data.filter(r => r.events.some(e => e.event_type === 'COMPLETE'))
       completed.sort((a, b) => {
         const aEnd = Math.max(...a.events.map(e => new Date(e.event_timestamp)))
@@ -1054,7 +1058,116 @@ function HistoryView({ breakRules }) {
 
       {error && <p className="text-red-400 text-sm bg-red-900/20 rounded-xl px-4 py-3">{error}</p>}
 
-      {records !== null && (
+      {/* View mode toggle */}
+      <div className="flex rounded-xl overflow-hidden border border-stone-700">
+        {[['individual', 'By Worker'], ['by_job', 'By Job']].map(([m, label]) => (
+          <button key={m} onClick={() => setMode(m)}
+            className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${
+              mode === m ? 'bg-amber-600/30 text-amber-300' : 'bg-stone-900 text-stone-500'
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'by_job' && allRecords !== null && (() => {
+        const DEPT_ORDER = ['kitting', 'weld', 'paint', 'assembly']
+        const groups = new Map()
+        for (const r of allRecords) {
+          const key = `${r.po_number}|${r.part_number}`
+          if (!groups.has(key)) groups.set(key, {
+            key, po: r.po_number, part: r.part_number,
+            depts: new Map(), latest: 0, total: 0, allComplete: true
+          })
+          const g  = groups.get(key)
+          const ms = calcElapsed(r.events, breakRules)
+          const d  = g.depts.get(r.department) ?? { total: 0, workers: [] }
+          d.total += ms
+          d.workers.push({ record: r, ms })
+          g.depts.set(r.department, d)
+          g.total += ms
+          g.latest = Math.max(g.latest, ...r.events.map(e => +new Date(e.event_timestamp)))
+          if (!r.events.some(e => e.event_type === 'COMPLETE')) g.allComplete = false
+        }
+        const jobGroups = [...groups.values()].sort((a, b) => b.latest - a.latest)
+
+        return (
+          <>
+            <p className="text-xs text-stone-600 px-1">{jobGroups.length} job{jobGroups.length !== 1 ? 's' : ''} · totals include work still in progress</p>
+            {jobGroups.length === 0 && (
+              <div className="text-center py-16 text-stone-600">
+                <p className="text-4xl mb-4">📋</p>
+                <p>No jobs in this range</p>
+              </div>
+            )}
+            <div className="space-y-2">
+              {jobGroups.map(g => {
+                const open = expanded === g.key
+                const deptEntries = DEPT_ORDER.filter(d => g.depts.has(d))
+                  .concat([...g.depts.keys()].filter(d => !DEPT_ORDER.includes(d)))
+                return (
+                  <div key={g.key} className="bg-stone-900 border border-stone-700 rounded-2xl overflow-hidden">
+                    <div className="px-4 py-4 cursor-pointer hover:bg-stone-800/50 transition-colors"
+                      onClick={() => setExpanded(open ? null : g.key)}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <p className="text-stone-100 font-semibold truncate">PO {g.po}</p>
+                            <span className={`text-xs ${g.allComplete ? 'text-emerald-500' : 'text-amber-500'}`}>
+                              {g.allComplete ? '✓ complete' : '● in progress'}
+                            </span>
+                          </div>
+                          <p className="text-stone-500 text-xs mb-2">Part: {g.part}</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {deptEntries.map(d => (
+                              <span key={d} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-stone-800 border border-stone-700 text-xs">
+                                <span className={`font-bold uppercase ${DEPT_COLOUR[d] ?? 'text-stone-400'}`}>{d}</span>
+                                <span className="font-mono text-stone-300 tabular-nums">{formatDuration(g.depts.get(d).total)}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="font-mono font-bold text-xl text-stone-200 tabular-nums">{formatDuration(g.total)}</p>
+                          <p className="text-stone-600 text-xs mt-1">{open ? '▲ hide detail' : '▼ detail'}</p>
+                        </div>
+                      </div>
+                    </div>
+                    {open && (
+                      <div className="border-t border-stone-700 px-4 py-3 space-y-3 bg-stone-950/40">
+                        {deptEntries.map(d => (
+                          <div key={d}>
+                            <p className={`text-xs font-bold uppercase mb-1 ${DEPT_COLOUR[d] ?? 'text-stone-400'}`}>{d}</p>
+                            {g.depts.get(d).workers
+                              .sort((a, b) => b.ms - a.ms)
+                              .map(({ record, ms }) => (
+                              <div key={`${record.job_id}_${record.employee_id}`} className="flex items-center justify-between py-1">
+                                <span className="text-sm text-stone-300 truncate">
+                                  {record.full_name}
+                                  {!record.events.some(e => e.event_type === 'COMPLETE') && (
+                                    <span className="text-amber-500 text-xs ml-2">● active</span>
+                                  )}
+                                </span>
+                                <span className="flex items-center gap-3 shrink-0">
+                                  <span className="font-mono text-sm text-stone-400 tabular-nums">{formatDuration(ms)}</span>
+                                  <button onClick={e => { e.stopPropagation(); setEditing(record) }}
+                                    className="text-xs text-amber-500 underline hover:text-amber-300">Edit</button>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )
+      })()}
+
+      {mode === 'individual' && records !== null && (
         <>
           <p className="text-xs text-stone-600 px-1">{records.length} completed job{records.length !== 1 ? 's' : ''}</p>
           {records.length === 0 && (
