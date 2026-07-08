@@ -6,6 +6,7 @@ import {
   fetchDepartmentEmployees, managerStartWorkerOnJob, managerStartAssemblyJobFull,
   findOrCreateJob, addTeamMemberToJob, employeeHasCompletedJob,
   loadJobHistory, loadJobEvents, updateEventTimestamp, deleteJobEvent, addJobEvent,
+  deleteCreatedJob,
 } from '../lib/db'
 import { calcElapsed, formatDuration, isJobActive, parseJobBarcode } from '../lib/timeCalc'
 import { HOLD_REASONS, HOLD_REASON_LABEL } from '../lib/constants'
@@ -50,6 +51,7 @@ function ManagerActionModal({ action, onClose, onDone }) {
   const [busyAdd, setBusyAdd]           = useState(null)
   const [error, setError]               = useState('')
   const [localMembers, setLocalMembers] = useState(() => action.members ?? [])
+  const [deleteJobArm, setDeleteJobArm] = useState(false)
 
   const { type, emp, job, lineId, members } = action
   const isAssembly = type === 'assembly'
@@ -364,6 +366,18 @@ function ManagerActionModal({ action, onClose, onDone }) {
                 + Add Team Member
               </button>
             )}
+            <button disabled={busy}
+              onClick={() => {
+                if (!deleteJobArm) { setDeleteJobArm(true); return }
+                run(() => deleteCreatedJob(job.job_id))
+              }}
+              className={`w-full py-3 rounded-xl border text-sm transition-colors disabled:opacity-40 ${
+                deleteJobArm
+                  ? 'border-red-500 bg-red-600/30 text-red-200 font-bold'
+                  : 'border-red-900/60 bg-red-950/20 text-red-400/80 hover:bg-red-950/40'
+              }`}>
+              {deleteJobArm ? 'Tap again — deletes the job and ALL its time' : '🗑 Delete Job (test / mis-scan)'}
+            </button>
             <button className="w-full mt-2 text-sm text-stone-500 underline pt-1" onClick={onDone}>Close</button>
           </div>
         )}

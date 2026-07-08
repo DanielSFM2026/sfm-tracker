@@ -241,7 +241,7 @@ function TeamEditModal({ job, lineId, managerId, onAdd, onClockOff, onRemovePerm
             className={`w-full mt-3 py-3 rounded-xl border text-sm shrink-0 transition-colors ${
               cancelArm
                 ? 'border-red-500 bg-red-600/30 text-red-200 font-bold'
-                : 'border-stone-700 text-stone-500 hover:text-red-400 hover:border-red-800'
+                : 'border-red-900/60 bg-red-950/20 text-red-400 hover:bg-red-950/40'
             }`}>
             {cancelArm ? 'Tap again — job will be removed' : '✕ Wrong scan? Cancel this job'}
           </button>

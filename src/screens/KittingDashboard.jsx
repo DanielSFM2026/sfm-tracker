@@ -76,7 +76,7 @@ function KitCard({ job, onComplete, onCancel }) {
           <button
             onClick={() => onCancel(job)}
             title="Wrong scan — remove this kit"
-            className="px-4 py-3 rounded-xl border border-stone-700 text-stone-500 hover:text-red-400 hover:border-red-800 text-base">
+            className="px-4 py-3 rounded-xl border border-red-900/60 bg-red-950/20 text-red-400 hover:bg-red-950/40 text-base">
             ✕
           </button>
           <button
