@@ -116,13 +116,23 @@ export async function findOrCreateJob(poNumber, partNumber, department = 'weld')
   return { job: data, created: true }
 }
 
-// Fully delete a job: events, issue reports, paint-batch links, then the row
+// Fully delete a job: events, issue reports, paint-batch links, then the row.
+// Everyone who had time on it gets their split multiplier re-stamped afterwards —
+// otherwise their remaining active jobs keep counting at the stale ÷N rate.
 export async function deleteCreatedJob(jobId) {
+  const { data: affected } = await supabase
+    .from('job_events').select('employee_id').eq('job_id', jobId)
+  const affectedIds = [...new Set((affected ?? []).map(r => r.employee_id))]
+
   await supabase.from('job_alerts').delete().eq('job_id', jobId)
   await supabase.from('paint_batch_jobs').delete().eq('job_id', jobId)
   await supabase.from('job_events').delete().eq('job_id', jobId)
   const { error } = await supabase.from('jobs').delete().eq('job_id', jobId)
   if (error) throw error
+
+  for (const empId of affectedIds) {
+    await rebalanceEmployeeSplit(empId)
+  }
 }
 
 // Worker backs out of a job they scanned by mistake: removes only their own
