@@ -9,7 +9,7 @@ import {
   deleteCreatedJob,
 } from '../lib/db'
 import { calcElapsed, formatDuration, isJobActive, parseJobBarcode } from '../lib/timeCalc'
-import { HOLD_REASONS, HOLD_REASON_LABEL } from '../lib/constants'
+import { holdReasonsFor, HOLD_REASON_LABEL } from '../lib/constants'
 
 const REFRESH_MS      = 10_000   // change-probe cadence (tiny request)
 const FULL_REFRESH_MS = 60_000   // full reload at least this often
@@ -286,7 +286,7 @@ function ManagerActionModal({ action, onClose, onDone }) {
           <>
             <p className="text-stone-400 text-sm mb-3">Select {isAssembly ? 'hold' : 'pause'} reason:</p>
             <div className="space-y-2 mb-4">
-              {HOLD_REASONS.map(r => (
+              {holdReasonsFor(isAssembly ? 'assembly' : emp?.department).map(r => (
                 <button key={r.key} disabled={busy}
                   className="w-full text-left px-4 py-3 rounded-xl bg-stone-700 hover:bg-orange-900/40
                              border border-stone-600 hover:border-orange-700 text-stone-200 text-sm"
