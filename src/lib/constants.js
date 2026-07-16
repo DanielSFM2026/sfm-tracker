@@ -13,7 +13,6 @@ export const HOLD_REASONS_WELD = [
   { key: 'kitting_issue',      label: 'Kitting Issue / Missing Part' },
   { key: 'bip_issue',          label: 'BIP Issue' },
   { key: 'weld_issue',         label: 'Weld Issue' },
-  { key: 'missing_part',       label: 'Missing Part' },
 ]
 
 export function holdReasonsFor(department) {
