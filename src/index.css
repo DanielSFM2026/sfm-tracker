@@ -83,7 +83,7 @@ html.light .text-stone-200 { color: #292524 !important; }
 html.light .text-stone-300 { color: #44403c !important; }
 html.light .text-stone-400 { color: #57534e !important; }
 html.light .text-stone-500 { color: #78716c !important; }
-html.light .text-stone-600 { color: #a8a29e !important; }
+html.light .text-stone-600 { color: #8f8981 !important; }
 html.light .placeholder-stone-600::placeholder { color: #a8a29e !important; }
 
 /* Accent text: bright-on-dark shades drop to readable-on-light shades */
@@ -103,3 +103,21 @@ html.light [class*="bg-amber-500/"] { background-color: #fef3c7 !important; }
 html.light [class*="bg-red-600/"] { background-color: #fecaca !important; }
 html.light [class*="bg-emerald-900/"], html.light [class*="bg-emerald-600/"] { background-color: #d1fae5 !important; }
 html.light .btn-ghost { border-color: #a8a29e; color: #57534e; }
+
+/* Light mode, round 2: root background + tinted headers/pills + pale accent text */
+html.light #root { background-color: #f5f5f4; }
+
+/* Department tier headers & info pills (dark navy/sky tints -> pale washes) */
+html.light [class*="bg-blue-950/"], html.light [class*="bg-blue-900/"],
+html.light [class*="bg-blue-500/"] { background-color: #dbeafe !important; }
+html.light [class*="bg-sky-900/"], html.light [class*="bg-sky-500/"] { background-color: #e0f2fe !important; }
+html.light [class*="bg-emerald-950/"], html.light [class*="bg-emerald-500/"] { background-color: #d1fae5 !important; }
+
+/* Pale accent text that vanishes on light washes -> deep readable shades */
+html.light .text-blue-300 { color: #1d4ed8 !important; }
+html.light .text-sky-200, html.light .text-sky-300 { color: #0369a1 !important; }
+html.light .text-emerald-200, html.light .text-emerald-300 { color: #047857 !important; }
+html.light .text-amber-200 { color: #92400e !important; }
+html.light .text-orange-300 { color: #c2410c !important; }
+html.light .text-blue-400 { color: #1d4ed8 !important; }
+html.light .text-sky-400 { color: #0284c7 !important; }
