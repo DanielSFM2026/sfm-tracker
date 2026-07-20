@@ -46,3 +46,60 @@ html, body, #root {
 .btn-danger    { @apply btn bg-red-700 text-white; }
 .btn-green     { @apply btn bg-emerald-600 text-white; }
 .btn-ghost     { @apply btn border border-stone-600 text-stone-300; }
+
+/* ── Light mode ───────────────────────────────────────────────────────────────
+   The app is written against the dark stone palette; this layer remaps those
+   utility classes when <html class="light"> is set (toggle: add ?light to the
+   URL, ?light=0 to go back — persisted in localStorage by main.jsx). */
+html.light, html.light body {
+  background-color: #f5f5f4;
+  color: #1c1917;
+}
+
+/* Surfaces: dark stones become paper */
+html.light .bg-stone-950 { background-color: #e7e5e4 !important; }
+html.light .bg-stone-900 { background-color: #ffffff !important; }
+html.light .bg-stone-800 { background-color: #fafaf9 !important; }
+html.light .bg-stone-700 { background-color: #e7e5e4 !important; }
+html.light .bg-stone-600 { background-color: #d6d3d1 !important; }
+html.light .bg-stone-500 { background-color: #a8a29e !important; }
+html.light [class*="bg-stone-950/"] { background-color: #efeeed !important; }
+html.light [class*="bg-stone-900/"] { background-color: rgba(255,255,255,.85) !important; }
+html.light [class*="bg-stone-800/"] { background-color: #f5f5f4 !important; }
+html.light [class*="bg-stone-700/"] { background-color: #e7e5e4 !important; }
+html.light .hover\:bg-stone-700:hover { background-color: #d6d3d1 !important; }
+html.light .bg-black\/80 { background-color: rgba(28,25,23,.45) !important; }
+
+/* Borders */
+html.light .border-stone-500 { border-color: #a8a29e !important; }
+html.light .border-stone-600 { border-color: #d6d3d1 !important; }
+html.light .border-stone-700,
+html.light [class*="border-stone-700/"] { border-color: #e7e5e4 !important; }
+html.light .border-stone-800 { border-color: #efeeed !important; }
+
+/* Text: light stones become ink */
+html.light .text-stone-100 { color: #1c1917 !important; }
+html.light .text-stone-200 { color: #292524 !important; }
+html.light .text-stone-300 { color: #44403c !important; }
+html.light .text-stone-400 { color: #57534e !important; }
+html.light .text-stone-500 { color: #78716c !important; }
+html.light .text-stone-600 { color: #a8a29e !important; }
+html.light .placeholder-stone-600::placeholder { color: #a8a29e !important; }
+
+/* Accent text: bright-on-dark shades drop to readable-on-light shades */
+html.light .text-amber-300, html.light .text-amber-400 { color: #b45309 !important; }
+html.light .text-amber-500 { color: #d97706 !important; }
+html.light .text-emerald-400, html.light .text-emerald-500 { color: #059669 !important; }
+html.light .text-red-400, html.light .text-red-200, html.light .text-red-300 { color: #dc2626 !important; }
+html.light .text-orange-400 { color: #ea580c !important; }
+html.light .text-blue-400 { color: #2563eb !important; }
+
+/* Tinted dark surfaces (holds, alerts, armed deletes) lighten up */
+html.light [class*="bg-red-950/"], html.light [class*="bg-red-900/"] { background-color: #fee2e2 !important; }
+html.light [class*="bg-amber-950/"], html.light [class*="bg-amber-900/"] { background-color: #fef3c7 !important; }
+html.light [class*="bg-orange-950/"], html.light [class*="bg-orange-900/"] { background-color: #ffedd5 !important; }
+html.light [class*="bg-amber-600/"] { background-color: #fde68a !important; }
+html.light [class*="bg-amber-500/"] { background-color: #fef3c7 !important; }
+html.light [class*="bg-red-600/"] { background-color: #fecaca !important; }
+html.light [class*="bg-emerald-900/"], html.light [class*="bg-emerald-600/"] { background-color: #d1fae5 !important; }
+html.light .btn-ghost { border-color: #a8a29e; color: #57534e; }
