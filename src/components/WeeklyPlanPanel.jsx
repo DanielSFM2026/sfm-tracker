@@ -1,25 +1,43 @@
 import { useEffect, useMemo, useState } from 'react'
-import { fetchDeptPlan, isoWeek, jobKey } from '../lib/plan'
+import { fetchDeptPlan, fetchDeptJobStatuses, isoWeek, jobKey } from '../lib/plan'
 
-// Full-screen overlay: pick a job from the weekly plan instead of scanning.
-// department  — which build_plan week column to read (weld/kitting/assembly…)
-// title       — heading shown to the worker ("Weld", "Kitting", …)
-// activeKeys  — Set of jobKey(po, part) already on this worker's list
-// onPick(po, part) — called when a planned job is chosen
-// onClose()   — close without picking
-export default function WeeklyPlanPanel({ department, title, activeKeys, onPick, onClose }) {
-  const [plan, setPlan]     = useState(null)   // { weeks, byWeek } | null while loading
-  const [error, setError]   = useState('')
-  const [weekIdx, setWeekIdx] = useState(0)
+// Per-department wording + which upstream stage gates "ready vs waiting".
+const DEPT_UI = {
+  weld:     { ready: 'Ready to weld',  waiting: 'Waiting on kit',   done: 'Welded',    upstream: 'kit_week',   waitLabel: 'Waiting on kit' },
+  kitting:  { ready: 'Ready to kit',   waiting: 'Not started',      done: 'Kitted',    upstream: null,          waitLabel: 'Not started' },
+  assembly: { ready: 'Ready to build', waiting: 'Waiting on paint', done: 'Assembled', upstream: 'paint_week',  waitLabel: 'Waiting on paint' },
+}
+
+const isComplete = v => typeof v === 'string' && v.trim().toUpperCase() === 'COMPLETE'
+
+// state → styling
+const STATE = {
+  wip:     { stripe: 'bg-amber-500',   pill: 'text-amber-400 bg-amber-500/15',   tile: 'bg-amber-500',   row: 'border-l-amber-500' },
+  ready:   { stripe: 'bg-blue-500',    pill: 'text-blue-400 bg-blue-500/15',     tile: 'bg-blue-500',    row: 'border-l-blue-500' },
+  waiting: { stripe: 'bg-stone-500',   pill: 'text-stone-400 bg-stone-600/40',   tile: 'bg-stone-500',   row: 'border-l-stone-600' },
+  done:    { stripe: 'bg-emerald-500', pill: 'text-emerald-400 bg-emerald-500/15', tile: 'bg-emerald-500', row: 'border-l-emerald-600' },
+}
+
+function useClock() {
+  const [t, setT] = useState(() => new Date())
+  useEffect(() => { const id = setInterval(() => setT(new Date()), 15000); return () => clearInterval(id) }, [])
+  return `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`
+}
+
+export default function WeeklyPlanPanel({ department, title, operatorName, activeKeys, onPick, onClose }) {
+  const ui = DEPT_UI[department] ?? DEPT_UI.weld
+  const [plan, setPlan]         = useState(null)
+  const [statuses, setStatuses] = useState(new Map())
+  const [error, setError]       = useState('')
+  const [weekIdx, setWeekIdx]   = useState(0)
+  const clock = useClock()
 
   useEffect(() => {
     let alive = true
-    fetchDeptPlan(department)
-      .then(res => {
+    Promise.all([fetchDeptPlan(department), fetchDeptJobStatuses(department).catch(() => new Map())])
+      .then(([res, st]) => {
         if (!alive) return
-        setPlan(res)
-        // Default to this ISO week if it has jobs, else the next planned week,
-        // else the last — so the worker lands on what's current.
+        setPlan(res); setStatuses(st)
         const wk = isoWeek()
         let idx = res.weeks.indexOf(wk)
         if (idx === -1) idx = res.weeks.findIndex(w => w >= wk)
@@ -32,100 +50,154 @@ export default function WeeklyPlanPanel({ department, title, activeKeys, onPick,
 
   const weeks = plan?.weeks ?? []
   const week  = weeks[weekIdx]
-  const jobs  = useMemo(() => (week != null ? plan.byWeek.get(week) ?? [] : []), [plan, week])
+
+  function stateOf(job) {
+    const st = statuses.get(jobKey(job.po_number, job.part_number))
+    if (st === 'completed') return 'done'
+    if (st === 'in_progress' || st === 'paused') return 'wip'
+    if (ui.upstream && !isComplete(job[ui.upstream])) return 'waiting'
+    return 'ready'
+  }
+
+  const jobs = useMemo(() => {
+    if (week == null || !plan) return []
+    return (plan.byWeek.get(week) ?? []).map(j => ({ ...j, _state: stateOf(j) }))
+  }, [plan, week, statuses])
+
+  const counts = useMemo(() => {
+    const c = { total: jobs.length, wip: 0, ready: 0, waiting: 0, done: 0 }
+    for (const j of jobs) c[j._state]++
+    return c
+  }, [jobs])
+
+  const stateLabel = { wip: 'In progress', ready: ui.ready, waiting: ui.waiting, done: ui.done }
 
   return (
-    <div className="fixed inset-0 z-50 bg-stone-950 flex flex-col">
+    <div className="fixed inset-0 z-50 bg-stone-950 flex flex-col text-stone-100">
 
       {/* Header */}
-      <div className="bg-stone-900 border-b border-stone-700 px-5 py-4 flex items-center justify-between shrink-0 gap-3">
-        <div className="min-w-0">
-          <p className="text-xs text-stone-500 uppercase tracking-widest">Weekly plan</p>
-          <p className="text-xl font-bold text-stone-100 truncate">{title}</p>
+      <div className="shrink-0 px-5 py-4 flex items-center justify-between gap-4 border-b border-stone-800
+                      bg-gradient-to-r from-stone-900 to-stone-950">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="w-11 h-11 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 grid place-items-center
+                           font-black text-stone-950 text-sm shrink-0">SFM</span>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-extrabold tracking-wide uppercase leading-none truncate">{title}</h1>
+            {operatorName && (
+              <p className="text-xs text-stone-400 mt-1">
+                Operator <span className="bg-stone-800 border border-stone-700 rounded px-2 py-0.5 text-amber-300 font-semibold">{operatorName}</span>
+              </p>
+            )}
+          </div>
         </div>
-        <button className="btn-ghost px-5 py-3 text-base" onClick={onClose}>Close</button>
+
+        {/* Week selector */}
+        <div className="flex items-center gap-2 bg-stone-900 border border-stone-700 rounded-2xl px-2 py-1.5">
+          <button disabled={weekIdx <= 0} onClick={() => setWeekIdx(i => Math.max(0, i - 1))}
+            className="w-10 h-10 rounded-xl bg-stone-800 border border-stone-700 text-xl disabled:opacity-30">‹</button>
+          <div className="text-center px-1">
+            <p className="text-[10px] uppercase tracking-widest text-stone-500 leading-none">Week</p>
+            <select
+              value={week ?? ''}
+              onChange={e => setWeekIdx(Math.max(0, weeks.indexOf(+e.target.value)))}
+              className="bg-transparent text-2xl font-extrabold text-amber-400 tabular-nums text-center outline-none cursor-pointer appearance-none">
+              {weeks.map(w => <option key={w} value={w} className="bg-stone-900">{w}</option>)}
+            </select>
+          </div>
+          <button disabled={weekIdx >= weeks.length - 1} onClick={() => setWeekIdx(i => Math.min(weeks.length - 1, i + 1))}
+            className="w-10 h-10 rounded-xl bg-stone-800 border border-stone-700 text-xl disabled:opacity-30">›</button>
+        </div>
+
+        <div className="text-right shrink-0 hidden sm:block">
+          <p className="text-xl font-mono tabular-nums">{clock}</p>
+          <button onClick={onClose} className="mt-1 text-sm text-stone-300 border border-stone-700 rounded-lg px-4 py-1.5 hover:bg-stone-800">Close</button>
+        </div>
+        <button onClick={onClose} className="sm:hidden text-sm text-stone-300 border border-stone-700 rounded-lg px-4 py-2">Close</button>
       </div>
 
-      {/* Week selector */}
-      <div className="bg-stone-900/60 border-b border-stone-800 px-5 py-3 flex items-center justify-between shrink-0">
-        <button
-          disabled={weekIdx <= 0}
-          onClick={() => setWeekIdx(i => Math.max(0, i - 1))}
-          className="w-12 h-12 rounded-xl border border-stone-600 bg-stone-800 text-stone-200 text-2xl leading-none disabled:opacity-30">
-          ‹
-        </button>
-        <div className="text-center">
-          <p className="text-xs text-stone-500 uppercase tracking-widest">Week</p>
-          <p className="text-2xl font-bold text-amber-400 tabular-nums">{week ?? '—'}</p>
-          {week != null && <p className="text-xs text-stone-500">{jobs.length} job{jobs.length === 1 ? '' : 's'}</p>}
-        </div>
-        <button
-          disabled={weekIdx >= weeks.length - 1}
-          onClick={() => setWeekIdx(i => Math.min(weeks.length - 1, i + 1))}
-          className="w-12 h-12 rounded-xl border border-stone-600 bg-stone-800 text-stone-200 text-2xl leading-none disabled:opacity-30">
-          ›
-        </button>
+      {/* Summary tiles */}
+      <div className="shrink-0 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 border-b border-stone-800">
+        <Tile n={counts.total} label="Jobs this week" stripe="bg-stone-500" />
+        <Tile n={counts.wip}     label="In progress"   stripe={STATE.wip.tile} />
+        <Tile n={counts.ready}   label={ui.ready}       stripe={STATE.ready.tile} />
+        <Tile n={counts.waiting} label={ui.waitLabel}   stripe={STATE.waiting.tile} />
+        <Tile n={counts.done}    label={ui.done}        stripe={STATE.done.tile} />
+      </div>
+
+      {/* Column header */}
+      <div className="shrink-0 hidden sm:flex items-center gap-3 px-5 py-2 text-[11px] uppercase tracking-widest text-stone-500 border-b border-stone-800/60">
+        <span className="flex-1">Part / Description</span>
+        <span className="w-14 text-center">Qty</span>
+        <span className="hidden md:block w-40">Customer</span>
+        <span className="w-24 text-center">Due</span>
+        <span className="w-32 text-center">Action</span>
       </div>
 
       {/* Job list */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2.5">
-        {error && <p className="text-red-400 text-sm text-center py-4">{error}</p>}
-
-        {!plan && !error && (
-          <p className="text-stone-500 text-center py-16 animate-pulse">Loading the plan…</p>
-        )}
-
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+        {error && <p className="text-red-400 text-center py-6">{error}</p>}
+        {!plan && !error && <p className="text-stone-500 text-center py-16 animate-pulse">Loading the plan…</p>}
         {plan && weeks.length === 0 && !error && (
-          <div className="text-center py-16 text-stone-600">
-            <p className="text-4xl mb-3">🗓️</p>
-            <p className="text-lg">No planned weeks for {title.toLowerCase()} yet.</p>
-          </div>
+          <div className="text-center py-16 text-stone-600"><p className="text-4xl mb-3">🗓️</p><p className="text-lg">No planned weeks yet.</p></div>
         )}
-
         {plan && week != null && jobs.length === 0 && (
-          <div className="text-center py-16 text-stone-600">
-            <p className="text-lg">Nothing planned for week {week}.</p>
-          </div>
+          <p className="text-center py-16 text-stone-600 text-lg">Nothing planned for week {week}.</p>
         )}
 
         {jobs.map(job => {
+          const s   = STATE[job._state]
+          const due = job.customer_req_date || job.original_date
           const onList = activeKeys?.has(jobKey(job.po_number, job.part_number))
+          const canStart = job._state !== 'done'
           return (
-            <button
-              key={job.seq_no ?? `${job.po_number}-${job.part_number}`}
-              onClick={() => onPick(job.po_number, job.part_number)}
-              className="w-full text-left bg-stone-800 border border-stone-700 hover:border-amber-500
-                         active:scale-[0.99] rounded-2xl p-4 flex items-center justify-between gap-3 transition-all">
-              <div className="min-w-0">
+            <div key={job.seq_no ?? `${job.po_number}-${job.part_number}`}
+              className={`flex items-center gap-3 rounded-xl bg-stone-900 border border-stone-800 border-l-4 ${s.row} pl-3 pr-3 py-2.5`}>
+              <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-mono text-lg font-bold text-stone-100">{job.part_number}</span>
-                  {job.model && (
-                    <span className="text-xs font-semibold text-amber-300 bg-amber-500/10 border border-amber-700/50 rounded px-1.5 py-0.5">
-                      {job.model}
-                    </span>
-                  )}
-                  {onList && (
-                    <span className="text-xs font-semibold text-sky-300 bg-sky-500/15 border border-sky-700/50 rounded-full px-2 py-0.5">
-                      On your list
-                    </span>
-                  )}
+                  <span className="font-mono text-lg font-bold">{job.part_number}</span>
+                  {job.model && <span className="text-xs font-semibold text-amber-300 bg-amber-500/10 border border-amber-700/50 rounded px-1.5 py-0.5">{job.model}</span>}
+                  <span className={`text-[11px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 ${s.pill}`}>● {stateLabel[job._state]}</span>
+                  {onList && <span className="text-[11px] font-semibold text-sky-300 bg-sky-500/15 border border-sky-700/50 rounded-full px-2 py-0.5">On your list</span>}
                 </div>
-                {job.description && (
-                  <p className="text-sm text-stone-400 truncate mt-0.5">{job.description}</p>
-                )}
-                <p className="text-xs text-stone-500 mt-0.5">
-                  PO {job.po_number}
-                  {job.quantity != null && <> · Qty {job.quantity}</>}
-                  {job.customer && <> · {String(job.customer).split(' - ')[0]}</>}
+                {job.description && <p className="text-sm text-stone-400 truncate mt-0.5">{job.description}</p>}
+                <p className="text-xs text-stone-500 mt-0.5 sm:hidden">
+                  PO {job.po_number}{job.quantity != null && <> · Qty {job.quantity}</>}{job.customer && <> · {String(job.customer).split(' - ')[0]}</>}{due && <> · Due {due}</>}
                 </p>
+                <p className="text-xs text-stone-600 mt-0.5 hidden sm:block">PO {job.po_number}</p>
               </div>
-              <span className="shrink-0 text-amber-400 font-semibold text-sm border border-amber-700/60 rounded-xl px-4 py-3">
-                Select
-              </span>
-            </button>
+
+              <div className="hidden sm:block w-14 text-center font-mono text-lg font-bold tabular-nums">{job.quantity ?? '—'}</div>
+              <div className="hidden md:block w-40 text-sm font-semibold truncate">{job.customer ? String(job.customer).split(' - ')[0] : '—'}</div>
+              <div className="hidden sm:block w-24 text-center font-mono text-sm">{due || '—'}</div>
+
+              <div className="w-32 shrink-0 flex justify-center">
+                {canStart ? (
+                  <button onClick={() => onPick(job.po_number, job.part_number)}
+                    className={`w-full py-3 rounded-xl font-bold text-base active:scale-95 transition-transform ${
+                      job._state === 'wip'
+                        ? 'bg-amber-500 hover:bg-amber-400 text-stone-950'
+                        : 'bg-blue-500 hover:bg-blue-400 text-white'
+                    }`}>
+                    {job._state === 'wip' ? 'Open' : '▶ Start'}
+                  </button>
+                ) : (
+                  <span className="w-full py-3 rounded-xl text-center font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-700/40">✓ {ui.done}</span>
+                )}
+              </div>
+            </div>
           )
         })}
       </div>
+    </div>
+  )
+}
+
+function Tile({ n, label, stripe }) {
+  return (
+    <div className="relative bg-stone-900 border border-stone-800 rounded-xl px-4 py-3 overflow-hidden">
+      <span className={`absolute left-0 top-0 bottom-0 w-1 ${stripe}`} />
+      <p className="text-3xl font-extrabold tabular-nums leading-none">{n}</p>
+      <p className="text-[11px] uppercase tracking-widest text-stone-500 font-semibold mt-1 truncate">{label}</p>
     </div>
   )
 }

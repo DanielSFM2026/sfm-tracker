@@ -224,16 +224,17 @@ export default function KittingDashboard({ employee, onLogout }) {
 
       {/* Scan input */}
       <div className="bg-stone-800 border-b border-stone-700 px-5 py-4 shrink-0">
+        <button onClick={() => setShowPlan(true)}
+          className="w-full mb-4 py-4 rounded-2xl bg-amber-500 hover:bg-amber-400 active:scale-[0.99]
+                     text-stone-950 font-extrabold text-lg flex items-center justify-center gap-2 transition-all
+                     shadow-lg shadow-amber-500/10">
+          📋 Weekly Plan
+        </button>
         <div className="flex items-center justify-between mb-2 gap-2">
-          <p className="text-xs text-stone-500 uppercase tracking-widest">Scan barcode to add kit</p>
-          <div className="flex items-center gap-4">
-            <button onClick={() => setShowPlan(true)} className="text-xs text-amber-400 hover:text-amber-300 underline">
-              📋 Weekly plan
-            </button>
-            <button onClick={() => setShowManual(true)} className="text-xs text-stone-500 hover:text-stone-300 underline">
-              ⌨ Type manually
-            </button>
-          </div>
+          <p className="text-xs text-stone-500 uppercase tracking-widest">Or scan barcode to add kit</p>
+          <button onClick={() => setShowManual(true)} className="text-xs text-stone-500 hover:text-stone-300 underline">
+            ⌨ Type manually
+          </button>
         </div>
         <div className="relative">
           <input
@@ -292,6 +293,7 @@ export default function KittingDashboard({ employee, onLogout }) {
         <WeeklyPlanPanel
           department="kitting"
           title="Kitting"
+          operatorName={employee.full_name}
           activeKeys={new Set(jobs.map(j => jobKey(j.po_number, j.part_number)))}
           onPick={(po, part) => { setShowPlan(false); addKit(po, part) }}
           onClose={() => setShowPlan(false)}

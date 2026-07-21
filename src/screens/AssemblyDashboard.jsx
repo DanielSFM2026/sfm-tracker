@@ -721,11 +721,12 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
 
       {/* Job scan input — all assembly users */}
       <div className="bg-stone-900/60 border-b border-stone-800 px-4 py-3">
-        <div className="flex items-center justify-end mb-2">
-          <button onClick={() => setShowPlan(true)} className="text-xs text-amber-400 hover:text-amber-300 underline">
-            📋 Weekly plan
-          </button>
-        </div>
+        <button onClick={() => setShowPlan(true)}
+          className="w-full mb-3 py-4 rounded-2xl bg-amber-500 hover:bg-amber-400 active:scale-[0.99]
+                     text-stone-950 font-extrabold text-lg flex items-center justify-center gap-2 transition-all
+                     shadow-lg shadow-amber-500/10">
+          📋 Weekly Plan
+        </button>
         <div className="flex gap-2">
           <input
             ref={scanRef}
@@ -882,6 +883,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
         <WeeklyPlanPanel
           department="assembly"
           title="Assembly"
+          operatorName={employee.full_name}
           activeKeys={new Set(jobs.map(j => jobKey(j.po_number, j.part_number)))}
           onPick={(po, part) => { setShowPlan(false); startAssemblyFlow(po, part) }}
           onClose={() => setShowPlan(false)}
