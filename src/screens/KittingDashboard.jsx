@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { findOrCreateJob, setJobStatus, completeJob, cancelMyJob } from '../lib/db'
 import { parseJobBarcode, formatDuration } from '../lib/timeCalc'
 import { supabase } from '../lib/supabase'
+import WeeklyPlanPanel from '../components/WeeklyPlanPanel'
+import { jobKey } from '../lib/plan'
 
 const INACTIVITY_MS = 120_000
 
@@ -96,6 +98,7 @@ export default function KittingDashboard({ employee, onLogout }) {
   const [error, setError]   = useState('')
   const [scanning, setScanning] = useState(false)
   const [showManual, setShowManual] = useState(false)
+  const [showPlan, setShowPlan]     = useState(false)
 
   const scanRef   = useRef(null)
   const bufRef    = useRef('')
@@ -152,14 +155,16 @@ export default function KittingDashboard({ employee, onLogout }) {
   async function handleScan(raw) {
     const parsed = parseJobBarcode(raw)
     if (!parsed) { setError(`Could not parse: "${raw}". Expected PO/PART`); return }
+    addKit(parsed.poNumber, parsed.partNumber)
+  }
 
+  // Shared by the scanner and the Weekly Plan picker
+  async function addKit(poNumber, partNumber) {
     setScanning(true); setError('')
     try {
-      const { job } = await findOrCreateJob(
-        parsed.poNumber, parsed.partNumber, 'kitting'
-      )
+      const { job } = await findOrCreateJob(poNumber, partNumber, 'kitting')
       if (jobs.find(j => j.job_id === job.job_id)) {
-        setError(`${parsed.poNumber} is already on your list.`)
+        setError(`${poNumber} is already on your list.`)
         return
       }
       // Record that this person picked up the kit
@@ -219,11 +224,16 @@ export default function KittingDashboard({ employee, onLogout }) {
 
       {/* Scan input */}
       <div className="bg-stone-800 border-b border-stone-700 px-5 py-4 shrink-0">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-2 gap-2">
           <p className="text-xs text-stone-500 uppercase tracking-widest">Scan barcode to add kit</p>
-          <button onClick={() => setShowManual(true)} className="text-xs text-stone-500 hover:text-stone-300 underline">
-            ⌨ Type manually
-          </button>
+          <div className="flex items-center gap-4">
+            <button onClick={() => setShowPlan(true)} className="text-xs text-amber-400 hover:text-amber-300 underline">
+              📋 Weekly plan
+            </button>
+            <button onClick={() => setShowManual(true)} className="text-xs text-stone-500 hover:text-stone-300 underline">
+              ⌨ Type manually
+            </button>
+          </div>
         </div>
         <div className="relative">
           <input
@@ -276,6 +286,15 @@ export default function KittingDashboard({ employee, onLogout }) {
         <ManualScanModal
           onSubmit={v => { setShowManual(false); handleScan(v) }}
           onCancel={() => setShowManual(false)}
+        />
+      )}
+      {showPlan && (
+        <WeeklyPlanPanel
+          department="kitting"
+          title="Kitting"
+          activeKeys={new Set(jobs.map(j => jobKey(j.po_number, j.part_number)))}
+          onPick={(po, part) => { setShowPlan(false); addKit(po, part) }}
+          onClose={() => setShowPlan(false)}
         />
       )}
       {modal && !modal.cancel && (

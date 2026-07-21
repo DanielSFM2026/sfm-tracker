@@ -9,6 +9,8 @@ import {
 import { isJobActive, calcElapsed, formatDuration } from '../lib/timeCalc'
 import { HOLD_REASONS } from '../lib/constants'
 import AlertModal from '../components/AlertModal'
+import WeeklyPlanPanel from '../components/WeeklyPlanPanel'
+import { jobKey } from '../lib/plan'
 
 const INACTIVITY_MS = 120_000
 
@@ -420,6 +422,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
   const [error, setError]       = useState('')
   const [scanning, setScanning] = useState(false)
   const [manualEntry, setManualEntry] = useState(false)
+  const [showPlan, setShowPlan] = useState(false)
   const [deptEmployees, setDeptEmployees] = useState(null)
   const [breakRules, setBreakRules] = useState(appBreakRules ?? [])
 
@@ -491,8 +494,11 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
   async function handleJobScan(raw) {
     const idx = raw.indexOf('/')
     if (idx < 1) { setError(`Could not parse: "${raw}". Expected PO/PART`); return }
-    const po   = raw.slice(0, idx).trim()
-    const part = raw.slice(idx + 1).trim()
+    startAssemblyFlow(raw.slice(0, idx).trim(), raw.slice(idx + 1).trim())
+  }
+
+  // Shared by the scanner and the Weekly Plan picker
+  async function startAssemblyFlow(po, part) {
     setScanning(true); setError('')
     try {
       const { job, created } = await findOrCreateJob(po, part, 'assembly')
@@ -715,6 +721,11 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
 
       {/* Job scan input — all assembly users */}
       <div className="bg-stone-900/60 border-b border-stone-800 px-4 py-3">
+        <div className="flex items-center justify-end mb-2">
+          <button onClick={() => setShowPlan(true)} className="text-xs text-amber-400 hover:text-amber-300 underline">
+            📋 Weekly plan
+          </button>
+        </div>
         <div className="flex gap-2">
           <input
             ref={scanRef}
@@ -863,6 +874,17 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
             })
           }}
           onCancel={() => setModal(null)}
+        />
+      )}
+
+      {/* Weekly plan picker — select a job instead of scanning */}
+      {showPlan && (
+        <WeeklyPlanPanel
+          department="assembly"
+          title="Assembly"
+          activeKeys={new Set(jobs.map(j => jobKey(j.po_number, j.part_number)))}
+          onPick={(po, part) => { setShowPlan(false); startAssemblyFlow(po, part) }}
+          onClose={() => setShowPlan(false)}
         />
       )}
     </div>

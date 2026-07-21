@@ -14,6 +14,8 @@ import { isJobActive, parseJobBarcode } from '../lib/timeCalc'
 import JobCard from '../components/JobCard'
 import AlertModal from '../components/AlertModal'
 import PauseReasonModal from '../components/PauseReasonModal'
+import WeeklyPlanPanel from '../components/WeeklyPlanPanel'
+import { jobKey } from '../lib/plan'
 
 const INACTIVITY_TIMEOUT_MS = 75_000
 
@@ -155,6 +157,7 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
   const [scanning, setScanning]   = useState(false)
   const [modal, setModal]         = useState(null)
   const [showManual, setShowManual] = useState(false)
+  const [showPlan, setShowPlan]     = useState(false)
 
   const scanInputRef  = useRef(null)
   const bufferRef     = useRef('')
@@ -230,10 +233,16 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
       setError(`Could not parse barcode: "${rawValue}". Expected format: PO/PART`)
       return
     }
+    startJobFlow(parsed.poNumber, parsed.partNumber)
+  }
+
+  // Shared entry point for the scanner and the Weekly Plan picker — both resolve
+  // to a PO + part, which is exactly how a job is identified (findOrCreateJob).
+  async function startJobFlow(poNumber, partNumber) {
     setScanning(true)
     setError('')
     try {
-      const { job, created } = await findOrCreateJob(parsed.poNumber, parsed.partNumber)
+      const { job, created } = await findOrCreateJob(poNumber, partNumber)
       const existing = jobs.find(j => j.job_id === job.job_id)
 
       // What's already done on this machine (shared jobs) — shown in the modal
@@ -471,11 +480,16 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
 
       {/* Scan input */}
       <div className="bg-stone-800 border-b border-stone-700 px-5 py-4 shrink-0">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-2 gap-2">
           <p className="text-xs text-stone-500 uppercase tracking-widest">Scan a job barcode</p>
-          <button onClick={() => setShowManual(true)} className="text-xs text-stone-500 hover:text-stone-300 underline">
-            ⌨ Type manually
-          </button>
+          <div className="flex items-center gap-4">
+            <button onClick={() => setShowPlan(true)} className="text-xs text-amber-400 hover:text-amber-300 underline">
+              📋 Weekly plan
+            </button>
+            <button onClick={() => setShowManual(true)} className="text-xs text-stone-500 hover:text-stone-300 underline">
+              ⌨ Type manually
+            </button>
+          </div>
         </div>
         <div className="relative">
           <input
@@ -531,6 +545,17 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
         <ManualScanModal
           onSubmit={v => { setShowManual(false); handleJobScan(v) }}
           onCancel={() => setShowManual(false)}
+        />
+      )}
+
+      {/* Weekly plan picker — select a job instead of scanning */}
+      {showPlan && (
+        <WeeklyPlanPanel
+          department="weld"
+          title="Weld"
+          activeKeys={new Set(jobs.map(j => jobKey(j.po_number, j.part_number)))}
+          onPick={(po, part) => { setShowPlan(false); startJobFlow(po, part) }}
+          onClose={() => setShowPlan(false)}
         />
       )}
 
