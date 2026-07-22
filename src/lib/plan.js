@@ -99,6 +99,59 @@ export async function fetchDeptJobStatuses(department) {
   return map
 }
 
+const ACTIVITY_LABEL = { tack: 'Tack', weld: 'Weld', tack_weld: 'Tack & Weld' }
+const WORK_LABEL     = { parts: 'Parts', frames: 'Frames', parts_frames: 'Parts & Frames' }
+
+// "Tack · Parts", "Weld", or null when the department doesn't track activity/work type.
+export function activityLabel(activity_type, work_type) {
+  const a = ACTIVITY_LABEL[activity_type]
+  const w = WORK_LABEL[work_type]
+  if (a && w) return `${a} · ${w}`
+  return a ?? null
+}
+
+// Who (if anyone) is currently active on each job in a department, and what
+// they're doing — so the Weekly Plan can show "Paul Beagan · Tack · Parts"
+// on an in-progress row instead of just a pill. Keyed by jobKey(po, part);
+// each entry is an array because assembly jobs can have a whole team on them.
+export async function fetchDeptActiveWork(department) {
+  const pageSize = 1000
+  let rows = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from('job_events')
+      .select(`
+        job_id, employee_id, event_type, activity_type, work_type, event_timestamp,
+        jobs!inner ( po_number, part_number, department ),
+        employees ( full_name )
+      `)
+      .eq('jobs.department', department)
+      .in('event_type', ['START', 'RESUME', 'PAUSE', 'COMPLETE', 'AUTO_LOGOUT'])
+      .order('event_timestamp', { ascending: true })
+      .range(from, from + pageSize - 1)
+    if (error) throw error
+    rows = rows.concat(data ?? [])
+    if (!data || data.length < pageSize) break
+  }
+
+  // Last event per (job, employee) pair decides if they're currently active
+  const lastByPair = new Map()
+  for (const r of rows) lastByPair.set(`${r.job_id}_${r.employee_id}`, r)
+
+  const map = new Map()
+  for (const r of lastByPair.values()) {
+    if (r.event_type !== 'START' && r.event_type !== 'RESUME') continue
+    if (!r.jobs) continue
+    const k = jobKey(r.jobs.po_number, r.jobs.part_number)
+    if (!map.has(k)) map.set(k, [])
+    map.get(k).push({
+      name: r.employees?.full_name ?? 'Unknown',
+      label: activityLabel(r.activity_type, r.work_type),
+    })
+  }
+  return map
+}
+
 // ISO-8601 week number for defaulting the selector to "this week".
 export function isoWeek(date = new Date()) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))

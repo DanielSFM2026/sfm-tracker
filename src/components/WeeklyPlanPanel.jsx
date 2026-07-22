@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { fetchDeptPlan, fetchDeptJobStatuses, isoWeek, jobKey, asWeek } from '../lib/plan'
+import { fetchDeptPlan, fetchDeptJobStatuses, fetchDeptActiveWork, isoWeek, jobKey, asWeek } from '../lib/plan'
 
 // Per-department wording, plus:
 //  completed — THIS dept's completed-week column; a week number in it means the
@@ -29,20 +29,29 @@ function useClock() {
   return `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`
 }
 
-export default function WeeklyPlanPanel({ department, title, operatorName, activeKeys, onPick, onClose }) {
+// department, title — required.
+// operatorName, onPick, onClose — worker (full-screen) mode.
+// embedded — true for the manager view: no fixed overlay, no Close/clock, no
+//   Start/Open buttons (managers browse, they don't clock jobs in from here).
+export default function WeeklyPlanPanel({ department, title, operatorName, activeKeys, onPick, onClose, embedded = false }) {
   const ui = DEPT_UI[department] ?? DEPT_UI.weld
   const [plan, setPlan]         = useState(null)
   const [statuses, setStatuses] = useState(new Map())
+  const [activeWork, setActiveWork] = useState(new Map())
   const [error, setError]       = useState('')
   const [weekIdx, setWeekIdx]   = useState(0)
   const clock = useClock()
 
   useEffect(() => {
     let alive = true
-    Promise.all([fetchDeptPlan(department), fetchDeptJobStatuses(department).catch(() => new Map())])
-      .then(([res, st]) => {
+    Promise.all([
+      fetchDeptPlan(department),
+      fetchDeptJobStatuses(department).catch(() => new Map()),
+      fetchDeptActiveWork(department).catch(() => new Map()),
+    ])
+      .then(([res, st, active]) => {
         if (!alive) return
-        setPlan(res); setStatuses(st)
+        setPlan(res); setStatuses(st); setActiveWork(active)
         const wk = isoWeek()
         let idx = res.weeks.indexOf(wk)
         if (idx === -1) idx = res.weeks.findIndex(w => w >= wk)
@@ -87,16 +96,13 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
   const stateLabel = { wip: 'In progress', ready: ui.ready, waiting: ui.waiting, done: ui.done }
 
   return (
-    <div className="fixed inset-0 z-50 bg-stone-950 flex flex-col text-stone-100">
+    <div className={embedded ? 'flex flex-col text-stone-100' : 'fixed inset-0 z-50 bg-stone-950 flex flex-col text-stone-100'}>
 
-      {/* Header — compact: operator · week selector · clock/close */}
+      {/* Header — compact: operator name gets the space · week selector · clock/close */}
       <div className="shrink-0 px-3 py-2 flex items-center justify-between gap-2 border-b border-stone-800 bg-stone-900">
         <div className="min-w-0 flex-1">
           {operatorName && (
-            <p className="text-base text-stone-300 truncate">
-              <span className="text-stone-600 uppercase tracking-widest text-[10px] mr-1">Operator</span>
-              <span className="text-amber-300 font-semibold">{operatorName}</span>
-            </p>
+            <p className="text-lg font-bold text-amber-300 truncate">{operatorName}</p>
           )}
         </div>
 
@@ -118,8 +124,10 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
         </div>
 
         <div className="flex items-center gap-3 shrink-0 flex-1 justify-end">
-          <p className="text-base font-mono tabular-nums text-stone-400 hidden sm:block">{clock}</p>
-          <button onClick={onClose} className="text-sm text-stone-200 border border-stone-700 rounded-lg px-4 py-2 hover:bg-stone-800">Close</button>
+          {!embedded && <p className="text-base font-mono tabular-nums text-stone-400 hidden sm:block">{clock}</p>}
+          {!embedded && (
+            <button onClick={onClose} className="text-sm text-stone-200 border border-stone-700 rounded-lg px-4 py-2 hover:bg-stone-800">Close</button>
+          )}
         </div>
       </div>
 
@@ -138,11 +146,11 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
         <span className="w-14 text-center">Qty</span>
         <span className="hidden md:block w-40">Customer</span>
         <span className="w-24 text-center">Due</span>
-        <span className="w-32 text-center">Action</span>
+        <span className="w-32 text-center">{embedded ? 'Status' : 'Action'}</span>
       </div>
 
       {/* Job list */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+      <div className={embedded ? 'px-4 py-3 space-y-2' : 'flex-1 overflow-y-auto px-4 py-3 space-y-2'}>
         {error && <p className="text-red-400 text-center py-6">{error}</p>}
         {!plan && !error && <p className="text-stone-500 text-center py-16 animate-pulse">Loading the plan…</p>}
         {plan && weeks.length === 0 && !error && (
@@ -157,6 +165,7 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
           const due = job.customer_req_date || job.original_date
           const onList = activeKeys?.has(jobKey(job.po_number, job.part_number))
           const canStart = job._state !== 'done'
+          const workers  = job._state === 'wip' ? (activeWork.get(jobKey(job.po_number, job.part_number)) ?? []) : []
           return (
             <div key={job.seq_no ?? `${job.po_number}-${job.part_number}`}
               className={`flex items-center gap-3 rounded-xl bg-stone-900 border border-stone-800 border-l-4 ${s.row} pl-3 pr-3 py-2.5`}>
@@ -173,6 +182,12 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
                   <span className="font-mono font-bold text-amber-300 text-base sm:text-lg leading-none">{job.po_number}</span>
                 </div>
                 {job.description && <p className="text-sm text-stone-400 truncate mt-1">{job.description}</p>}
+                {/* Who's on it right now, and what they're doing */}
+                {workers.length > 0 && (
+                  <p className="text-xs text-amber-300/90 mt-1 truncate">
+                    👤 {workers.map(w => w.label ? `${w.name} · ${w.label}` : w.name).join(', ')}
+                  </p>
+                )}
                 <p className="text-xs text-stone-500 mt-0.5 sm:hidden">
                   Qty {job.quantity ?? '—'}{job.customer && <> · {String(job.customer).split(' - ')[0]}</>}{due && <> · Due {due}</>}
                 </p>
@@ -183,7 +198,11 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
               <div className="hidden sm:block w-24 text-center font-mono text-sm">{due || '—'}</div>
 
               <div className="w-32 shrink-0 flex justify-center">
-                {canStart ? (
+                {embedded ? (
+                  <span className={`w-full py-2.5 rounded-xl text-center text-xs font-semibold uppercase tracking-wide ${s.pill}`}>
+                    {stateLabel[job._state]}
+                  </span>
+                ) : canStart ? (
                   <button onClick={() => onPick(job.po_number, job.part_number)}
                     className={`w-full py-3 rounded-xl font-bold text-base active:scale-95 transition-transform ${
                       job._state === 'wip'
