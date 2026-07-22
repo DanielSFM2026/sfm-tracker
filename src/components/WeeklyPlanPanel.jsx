@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { fetchDeptPlan, fetchDeptJobStatuses, isoWeek, jobKey } from '../lib/plan'
+import { fetchDeptPlan, fetchDeptJobStatuses, isoWeek, jobKey, asWeek } from '../lib/plan'
 
-// Per-department wording + which upstream stage gates "ready vs waiting".
+// Per-department wording + which upstream stage's COMPLETED-week column gates
+// "ready vs waiting" (a job is ready once the upstream stage has a week filled in).
 const DEPT_UI = {
-  weld:     { ready: 'Ready to weld',  waiting: 'Waiting on kit',   done: 'Welded',    upstream: 'kit_week',   waitLabel: 'Waiting on kit' },
-  kitting:  { ready: 'Ready to kit',   waiting: 'Not started',      done: 'Kitted',    upstream: null,          waitLabel: 'Not started' },
-  assembly: { ready: 'Ready to build', waiting: 'Waiting on paint', done: 'Assembled', upstream: 'paint_week',  waitLabel: 'Waiting on paint' },
+  weld:     { ready: 'Ready to weld',  waiting: 'Waiting on kit',   done: 'Welded',    upstream: 'kitting_week',  waitLabel: 'Waiting on kit' },
+  kitting:  { ready: 'Ready to kit',   waiting: 'Not started',      done: 'Kitted',    upstream: null,            waitLabel: 'Not started' },
+  assembly: { ready: 'Ready to build', waiting: 'Waiting on paint', done: 'Assembled', upstream: 'painting_week',  waitLabel: 'Waiting on paint' },
 }
-
-const isComplete = v => typeof v === 'string' && v.trim().toUpperCase() === 'COMPLETE'
 
 // state → styling
 const STATE = {
@@ -55,7 +54,7 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
     const st = statuses.get(jobKey(job.po_number, job.part_number))
     if (st === 'completed') return 'done'
     if (st === 'in_progress' || st === 'paused') return 'wip'
-    if (ui.upstream && !isComplete(job[ui.upstream])) return 'waiting'
+    if (ui.upstream && asWeek(job[ui.upstream]) == null) return 'waiting'
     return 'ready'
   }
 

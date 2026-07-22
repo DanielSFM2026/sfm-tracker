@@ -10,6 +10,7 @@ import {
 } from '../lib/db'
 import { calcElapsed, formatDuration, isJobActive, parseJobBarcode } from '../lib/timeCalc'
 import { holdReasonsFor, HOLD_REASON_LABEL } from '../lib/constants'
+import PlanDashboard from '../components/PlanDashboard'
 
 const REFRESH_MS      = 10_000   // change-probe cadence (tiny request)
 const FULL_REFRESH_MS = 60_000   // full reload at least this often
@@ -1360,7 +1361,7 @@ export default function ManagerReport({ onBack }) {
 
       {/* Tab bar */}
       <div className="bg-stone-900 border-b border-stone-700 flex shrink-0">
-        {[['live', 'Live Overview'], ['history', 'History']].map(([key, label]) => (
+        {[['live', 'Live Overview'], ['plan', 'Plan'], ['history', 'History']].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)}
             className={`flex-1 py-3 text-sm font-semibold transition-colors ${
               tab === key
@@ -1371,6 +1372,9 @@ export default function ManagerReport({ onBack }) {
           </button>
         ))}
       </div>
+
+      {/* Plan tab */}
+      {tab === 'plan' && <PlanDashboard />}
 
       {/* History tab */}
       {tab === 'history' && <HistoryView breakRules={breakRules} />}
