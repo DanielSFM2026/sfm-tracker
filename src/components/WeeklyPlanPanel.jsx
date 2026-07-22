@@ -196,27 +196,46 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
                 </div>
                 {job.description && <p className="text-sm text-stone-400 truncate mt-1">{job.description}</p>}
 
-                {/* Weld: 4 fixed cells (Tack/Weld × Parts/Frames), always shown —
-                    grey = untouched, amber = someone's on it now (named), green =
-                    done (named). The person's name lives right on their cell. */}
-                {cells && (
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {WELD_CELLS.map(c => {
-                      const cell = cells[c]
-                      const cls = cell.state === 'done'
-                        ? 'text-emerald-400 bg-emerald-500/15 border-emerald-700/50'
-                        : cell.state === 'active'
-                        ? 'text-amber-300 bg-amber-500/15 border-amber-600/50'
-                        : 'text-stone-500 bg-stone-800/60 border-stone-700'
-                      return (
-                        <span key={c} className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${cls}`}>
-                          {cell.state === 'done' ? '✓ ' : ''}{WELD_CELL_LABEL[c]}
-                          {cell.name && <span className="opacity-80"> — {cell.name}</span>}
-                        </span>
-                      )
-                    })}
-                  </div>
-                )}
+                {/* Weld: 4 fixed cells (Tack/Weld × Parts/Frames), grouped by
+                    person — their name once on the left, their pills after it —
+                    rather than repeating the name on every pill. Untouched
+                    cells (nobody's name) sit in their own plain grey row. */}
+                {cells && (() => {
+                  const byName = new Map()   // name -> [cellKey...], insertion order = WELD_CELLS order
+                  const pending = []
+                  for (const c of WELD_CELLS) {
+                    const cell = cells[c]
+                    if (!cell.name) { pending.push(c); continue }
+                    if (!byName.has(cell.name)) byName.set(cell.name, [])
+                    byName.get(cell.name).push(c)
+                  }
+                  const pillCls = c => cells[c].state === 'done'
+                    ? 'text-emerald-400 bg-emerald-500/15 border-emerald-700/50'
+                    : 'text-amber-300 bg-amber-500/15 border-amber-600/50'
+                  return (
+                    <div className="mt-1.5 space-y-1">
+                      {[...byName.entries()].map(([name, cellKeys]) => (
+                        <div key={name} className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-semibold text-stone-200 shrink-0">{name}</span>
+                          {cellKeys.map(c => (
+                            <span key={c} className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${pillCls(c)}`}>
+                              {cells[c].state === 'done' ? '✓ ' : ''}{WELD_CELL_LABEL[c]}
+                            </span>
+                          ))}
+                        </div>
+                      ))}
+                      {pending.length > 0 && (
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {pending.map(c => (
+                            <span key={c} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full border text-stone-500 bg-stone-800/60 border-stone-700">
+                              {WELD_CELL_LABEL[c]}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 {/* Kitting/Assembly: who's on it right now — one line per person */}
                 {workers.length > 0 && (
