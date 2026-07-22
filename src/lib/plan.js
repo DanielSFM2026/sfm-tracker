@@ -152,6 +152,44 @@ export async function fetchDeptActiveWork(department) {
   return map
 }
 
+// ── Weld machine progress (Tack/Weld × Parts/Frames) ─────────────────────────
+// Mirrors getWeldProgress in db.js (kept in sync manually — see WELD_CELLS
+// there): a weld machine is fully done once every activity×work-type cell has
+// been completed by someone. Batched here so the Weekly Plan can show every
+// job's progress in one query instead of one per row.
+export const WELD_CELLS = ['tack_parts', 'tack_frames', 'weld_parts', 'weld_frames']
+export const WELD_CELL_LABEL = { tack_parts: 'Tack · Parts', tack_frames: 'Tack · Frames', weld_parts: 'Weld · Parts', weld_frames: 'Weld · Frames' }
+const expandActivity = a => a === 'tack_weld' ? ['tack', 'weld'] : a ? [a] : []
+const expandWork     = w => w === 'parts_frames' ? ['parts', 'frames'] : w ? [w] : []
+
+// jobKey(po, part) -> Set of completed cell keys (subset of WELD_CELLS).
+export async function fetchWeldProgressMap() {
+  const pageSize = 1000
+  let rows = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from('job_events')
+      .select('activity_type, work_type, jobs!inner ( po_number, part_number, department )')
+      .eq('jobs.department', 'weld')
+      .eq('event_type', 'COMPLETE')
+      .range(from, from + pageSize - 1)
+    if (error) throw error
+    rows = rows.concat(data ?? [])
+    if (!data || data.length < pageSize) break
+  }
+  const map = new Map()
+  for (const r of rows) {
+    if (!r.jobs) continue
+    const k = jobKey(r.jobs.po_number, r.jobs.part_number)
+    if (!map.has(k)) map.set(k, new Set())
+    const set = map.get(k)
+    for (const a of expandActivity(r.activity_type))
+      for (const w of expandWork(r.work_type))
+        set.add(`${a}_${w}`)
+  }
+  return map
+}
+
 // ISO-8601 week number for defaulting the selector to "this week".
 export function isoWeek(date = new Date()) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))

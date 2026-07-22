@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { fetchDeptPlan, fetchDeptJobStatuses, fetchDeptActiveWork, isoWeek, jobKey, asWeek } from '../lib/plan'
+import {
+  fetchDeptPlan, fetchDeptJobStatuses, fetchDeptActiveWork, fetchWeldProgressMap,
+  isoWeek, jobKey, asWeek, WELD_CELLS, WELD_CELL_LABEL,
+} from '../lib/plan'
 
 // Per-department wording, plus:
 //  completed — THIS dept's completed-week column; a week number in it means the
@@ -38,6 +41,7 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
   const [plan, setPlan]         = useState(null)
   const [statuses, setStatuses] = useState(new Map())
   const [activeWork, setActiveWork] = useState(new Map())
+  const [weldProgress, setWeldProgress] = useState(new Map())
   const [error, setError]       = useState('')
   const [weekIdx, setWeekIdx]   = useState(0)
   const clock = useClock()
@@ -48,10 +52,11 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
       fetchDeptPlan(department),
       fetchDeptJobStatuses(department).catch(() => new Map()),
       fetchDeptActiveWork(department).catch(() => new Map()),
+      department === 'weld' ? fetchWeldProgressMap().catch(() => new Map()) : Promise.resolve(new Map()),
     ])
-      .then(([res, st, active]) => {
+      .then(([res, st, active, progress]) => {
         if (!alive) return
-        setPlan(res); setStatuses(st); setActiveWork(active)
+        setPlan(res); setStatuses(st); setActiveWork(active); setWeldProgress(progress)
         const wk = isoWeek()
         let idx = res.weeks.indexOf(wk)
         if (idx === -1) idx = res.weeks.findIndex(w => w >= wk)
@@ -165,7 +170,9 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
           const due = job.customer_req_date || job.original_date
           const onList = activeKeys?.has(jobKey(job.po_number, job.part_number))
           const canStart = job._state !== 'done'
-          const workers  = job._state === 'wip' ? (activeWork.get(jobKey(job.po_number, job.part_number)) ?? []) : []
+          const key      = jobKey(job.po_number, job.part_number)
+          const workers  = job._state === 'wip' ? (activeWork.get(key) ?? []) : []
+          const doneCells = department === 'weld' ? (weldProgress.get(key) ?? new Set()) : null
           return (
             <div key={job.seq_no ?? `${job.po_number}-${job.part_number}`}
               className={`flex items-center gap-3 rounded-xl bg-stone-900 border border-stone-800 border-l-4 ${s.row} pl-3 pr-3 py-2.5`}>
@@ -182,11 +189,31 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
                   <span className="font-mono font-bold text-amber-300 text-base sm:text-lg leading-none">{job.po_number}</span>
                 </div>
                 {job.description && <p className="text-sm text-stone-400 truncate mt-1">{job.description}</p>}
-                {/* Who's on it right now, and what they're doing */}
+
+                {/* Weld progress grid — what's done, what's left (Tack/Weld × Parts/Frames) */}
+                {doneCells && doneCells.size > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {WELD_CELLS.map(c => (
+                      <span key={c} className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
+                        doneCells.has(c)
+                          ? 'text-emerald-400 bg-emerald-500/15 border-emerald-700/50'
+                          : 'text-stone-500 bg-stone-800/60 border-stone-700'
+                      }`}>
+                        {doneCells.has(c) ? '✓ ' : ''}{WELD_CELL_LABEL[c]}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Who's on it right now — one line per person, with their task */}
                 {workers.length > 0 && (
-                  <p className="text-xs text-amber-300/90 mt-1 truncate">
-                    👤 {workers.map(w => w.label ? `${w.name} · ${w.label}` : w.name).join(', ')}
-                  </p>
+                  <div className="mt-1 space-y-0.5">
+                    {workers.map((w, i) => (
+                      <p key={i} className="text-xs text-amber-300/90 truncate">
+                        👤 {w.name}{w.label && <span className="text-amber-300/70"> · {w.label}</span>}
+                      </p>
+                    ))}
+                  </div>
                 )}
                 <p className="text-xs text-stone-500 mt-0.5 sm:hidden">
                   Qty {job.quantity ?? '—'}{job.customer && <> · {String(job.customer).split(' - ')[0]}</>}{due && <> · Due {due}</>}
