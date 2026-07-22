@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchDeptPlan, fetchDeptJobStatuses, isoWeek, jobKey, asWeek } from '../lib/plan'
 
-// Per-department wording + which upstream stage's COMPLETED-week column gates
-// "ready vs waiting" (a job is ready once the upstream stage has a week filled in).
+// Per-department wording, plus:
+//  completed — THIS dept's completed-week column; a week number in it means the
+//              planner marked the job done for this stage (e.g. weld → "W").
+//  upstream  — the previous stage's completed-week column that gates ready/waiting.
 const DEPT_UI = {
-  weld:     { ready: 'Ready to weld',  waiting: 'Waiting on kit',   done: 'Welded',    upstream: 'kitting_week',  waitLabel: 'Waiting on kit' },
-  kitting:  { ready: 'Ready to kit',   waiting: 'Not started',      done: 'Kitted',    upstream: null,            waitLabel: 'Not started' },
-  assembly: { ready: 'Ready to build', waiting: 'Waiting on paint', done: 'Assembled', upstream: 'painting_week',  waitLabel: 'Waiting on paint' },
+  weld:     { ready: 'Ready to weld',  waiting: 'Waiting on kit',   done: 'Welded',    completed: 'weld_week',        upstream: 'kitting_week',  waitLabel: 'Waiting on kit' },
+  kitting:  { ready: 'Ready to kit',   waiting: 'Not started',      done: 'Kitted',    completed: 'kitting_week',     upstream: null,            waitLabel: 'Not started' },
+  assembly: { ready: 'Ready to build', waiting: 'Waiting on paint', done: 'Assembled', completed: 'subassembly_week', upstream: 'painting_week',  waitLabel: 'Waiting on paint' },
 }
 
 // state → styling
@@ -55,6 +57,9 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
   const week  = weeks[weekIdx]
 
   function stateOf(job) {
+    // Planner marked this stage done: a week number in the dept's own column
+    // (e.g. weld → "W"). The planned week is kept, so trackability stays intact.
+    if (ui.completed && asWeek(job[ui.completed]) != null) return 'done'
     const st = statuses.get(jobKey(job.po_number, job.part_number))
     if (st === 'completed') return 'done'
     if (st === 'in_progress' || st === 'paused') return 'wip'
