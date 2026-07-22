@@ -17,6 +17,10 @@ const STATE = {
   done:    { stripe: 'bg-emerald-500', pill: 'text-emerald-400 bg-emerald-500/15', tile: 'bg-emerald-500', row: 'border-l-emerald-600' },
 }
 
+// List order: in-progress first, then ready, then waiting-on-upstream, with
+// completed at the very bottom. Within a group, by customer then part number.
+const STATE_RANK = { wip: 0, ready: 1, waiting: 2, done: 3 }
+
 function useClock() {
   const [t, setT] = useState(() => new Date())
   useEffect(() => { const id = setInterval(() => setT(new Date()), 15000); return () => clearInterval(id) }, [])
@@ -60,7 +64,13 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
 
   const jobs = useMemo(() => {
     if (week == null || !plan) return []
-    return (plan.byWeek.get(week) ?? []).map(j => ({ ...j, _state: stateOf(j) }))
+    const list = (plan.byWeek.get(week) ?? []).map(j => ({ ...j, _state: stateOf(j) }))
+    list.sort((a, b) =>
+      (STATE_RANK[a._state] - STATE_RANK[b._state]) ||
+      String(a.customer ?? '').localeCompare(String(b.customer ?? '')) ||
+      String(a.part_number ?? '').localeCompare(String(b.part_number ?? ''))
+    )
+    return list
   }, [plan, week, statuses])
 
   const counts = useMemo(() => {
@@ -74,48 +84,42 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
   return (
     <div className="fixed inset-0 z-50 bg-stone-950 flex flex-col text-stone-100">
 
-      {/* Header */}
-      <div className="shrink-0 px-5 py-4 flex items-center justify-between gap-4 border-b border-stone-800
-                      bg-gradient-to-r from-stone-900 to-stone-950">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="w-11 h-11 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 grid place-items-center
-                           font-black text-stone-950 text-sm shrink-0">SFM</span>
-          <div className="min-w-0">
-            <h1 className="text-2xl font-extrabold tracking-wide uppercase leading-none truncate">{title}</h1>
-            {operatorName && (
-              <p className="text-xs text-stone-400 mt-1">
-                Operator <span className="bg-stone-800 border border-stone-700 rounded px-2 py-0.5 text-amber-300 font-semibold">{operatorName}</span>
-              </p>
-            )}
-          </div>
+      {/* Header — compact: operator · week selector · clock/close */}
+      <div className="shrink-0 px-3 py-2 flex items-center justify-between gap-2 border-b border-stone-800 bg-stone-900">
+        <div className="min-w-0 flex-1">
+          {operatorName && (
+            <p className="text-sm text-stone-300 truncate">
+              <span className="text-stone-600 uppercase tracking-widest text-[10px] mr-1">Operator</span>
+              <span className="text-amber-300 font-semibold">{operatorName}</span>
+            </p>
+          )}
         </div>
 
         {/* Week selector */}
-        <div className="flex items-center gap-2 bg-stone-900 border border-stone-700 rounded-2xl px-2 py-1.5">
+        <div className="flex items-center gap-1.5 bg-stone-950 border border-stone-700 rounded-2xl px-1.5 py-1 shrink-0">
           <button disabled={weekIdx <= 0} onClick={() => setWeekIdx(i => Math.max(0, i - 1))}
-            className="w-10 h-10 rounded-xl bg-stone-800 border border-stone-700 text-xl disabled:opacity-30">‹</button>
+            className="w-9 h-9 rounded-xl bg-stone-800 border border-stone-700 text-xl disabled:opacity-30">‹</button>
           <div className="text-center px-1">
-            <p className="text-[10px] uppercase tracking-widest text-stone-500 leading-none">Week</p>
+            <p className="text-[9px] uppercase tracking-widest text-stone-500 leading-none">Week</p>
             <select
               value={week ?? ''}
               onChange={e => setWeekIdx(Math.max(0, weeks.indexOf(+e.target.value)))}
-              className="bg-transparent text-2xl font-extrabold text-amber-400 tabular-nums text-center outline-none cursor-pointer appearance-none">
+              className="bg-transparent text-xl font-extrabold text-amber-400 tabular-nums text-center outline-none cursor-pointer appearance-none">
               {weeks.map(w => <option key={w} value={w} className="bg-stone-900">{w}</option>)}
             </select>
           </div>
           <button disabled={weekIdx >= weeks.length - 1} onClick={() => setWeekIdx(i => Math.min(weeks.length - 1, i + 1))}
-            className="w-10 h-10 rounded-xl bg-stone-800 border border-stone-700 text-xl disabled:opacity-30">›</button>
+            className="w-9 h-9 rounded-xl bg-stone-800 border border-stone-700 text-xl disabled:opacity-30">›</button>
         </div>
 
-        <div className="text-right shrink-0 hidden sm:block">
-          <p className="text-xl font-mono tabular-nums">{clock}</p>
-          <button onClick={onClose} className="mt-1 text-sm text-stone-300 border border-stone-700 rounded-lg px-4 py-1.5 hover:bg-stone-800">Close</button>
+        <div className="flex items-center gap-3 shrink-0 flex-1 justify-end">
+          <p className="text-base font-mono tabular-nums text-stone-400 hidden sm:block">{clock}</p>
+          <button onClick={onClose} className="text-sm text-stone-200 border border-stone-700 rounded-lg px-4 py-2 hover:bg-stone-800">Close</button>
         </div>
-        <button onClick={onClose} className="sm:hidden text-sm text-stone-300 border border-stone-700 rounded-lg px-4 py-2">Close</button>
       </div>
 
       {/* Summary tiles */}
-      <div className="shrink-0 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 border-b border-stone-800">
+      <div className="shrink-0 px-3 py-2.5 grid grid-cols-3 sm:grid-cols-5 gap-2 border-b border-stone-800">
         <Tile n={counts.total} label="Jobs this week" stripe="bg-stone-500" />
         <Tile n={counts.wip}     label="In progress"   stripe={STATE.wip.tile} />
         <Tile n={counts.ready}   label={ui.ready}       stripe={STATE.ready.tile} />
@@ -193,10 +197,10 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
 
 function Tile({ n, label, stripe }) {
   return (
-    <div className="relative bg-stone-900 border border-stone-800 rounded-xl px-4 py-3 overflow-hidden">
+    <div className="relative bg-stone-900 border border-stone-800 rounded-xl px-3 py-2 overflow-hidden">
       <span className={`absolute left-0 top-0 bottom-0 w-1 ${stripe}`} />
-      <p className="text-3xl font-extrabold tabular-nums leading-none">{n}</p>
-      <p className="text-[11px] uppercase tracking-widest text-stone-500 font-semibold mt-1 truncate">{label}</p>
+      <p className="text-xl sm:text-2xl font-extrabold tabular-nums leading-none">{n}</p>
+      <p className="text-[10px] uppercase tracking-wider text-stone-500 font-semibold mt-1 leading-tight truncate">{label}</p>
     </div>
   )
 }
