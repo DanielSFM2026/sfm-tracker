@@ -88,7 +88,7 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
       <div className="shrink-0 px-3 py-2 flex items-center justify-between gap-2 border-b border-stone-800 bg-stone-900">
         <div className="min-w-0 flex-1">
           {operatorName && (
-            <p className="text-sm text-stone-300 truncate">
+            <p className="text-base text-stone-300 truncate">
               <span className="text-stone-600 uppercase tracking-widest text-[10px] mr-1">Operator</span>
               <span className="text-amber-300 font-semibold">{operatorName}</span>
             </p>
@@ -98,18 +98,18 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
         {/* Week selector */}
         <div className="flex items-center gap-1.5 bg-stone-950 border border-stone-700 rounded-2xl px-1.5 py-1 shrink-0">
           <button disabled={weekIdx <= 0} onClick={() => setWeekIdx(i => Math.max(0, i - 1))}
-            className="w-9 h-9 rounded-xl bg-stone-800 border border-stone-700 text-xl disabled:opacity-30">‹</button>
+            className="w-10 h-10 rounded-xl bg-stone-800 border border-stone-700 text-2xl disabled:opacity-30">‹</button>
           <div className="text-center px-1">
             <p className="text-[9px] uppercase tracking-widest text-stone-500 leading-none">Week</p>
             <select
               value={week ?? ''}
               onChange={e => setWeekIdx(Math.max(0, weeks.indexOf(+e.target.value)))}
-              className="bg-transparent text-xl font-extrabold text-amber-400 tabular-nums text-center outline-none cursor-pointer appearance-none">
+              className="bg-transparent text-2xl font-extrabold text-amber-400 tabular-nums text-center outline-none cursor-pointer appearance-none">
               {weeks.map(w => <option key={w} value={w} className="bg-stone-900">{w}</option>)}
             </select>
           </div>
           <button disabled={weekIdx >= weeks.length - 1} onClick={() => setWeekIdx(i => Math.min(weeks.length - 1, i + 1))}
-            className="w-9 h-9 rounded-xl bg-stone-800 border border-stone-700 text-xl disabled:opacity-30">›</button>
+            className="w-10 h-10 rounded-xl bg-stone-800 border border-stone-700 text-2xl disabled:opacity-30">›</button>
         </div>
 
         <div className="flex items-center gap-3 shrink-0 flex-1 justify-end">
@@ -162,11 +162,15 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
                   <span className={`text-[11px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 ${s.pill}`}>● {stateLabel[job._state]}</span>
                   {onList && <span className="text-[11px] font-semibold text-sky-300 bg-sky-500/15 border border-sky-700/50 rounded-full px-2 py-0.5">On your list</span>}
                 </div>
-                {job.description && <p className="text-sm text-stone-400 truncate mt-0.5">{job.description}</p>}
+                {/* PO — the disambiguator between two of the same part; kept prominent */}
+                <div className="flex items-center gap-1.5 mt-1">
+                  <span className="text-[10px] uppercase tracking-widest text-stone-500 font-bold">PO</span>
+                  <span className="font-mono font-bold text-amber-300 text-base sm:text-lg leading-none">{job.po_number}</span>
+                </div>
+                {job.description && <p className="text-sm text-stone-400 truncate mt-1">{job.description}</p>}
                 <p className="text-xs text-stone-500 mt-0.5 sm:hidden">
-                  PO {job.po_number}{job.quantity != null && <> · Qty {job.quantity}</>}{job.customer && <> · {String(job.customer).split(' - ')[0]}</>}{due && <> · Due {due}</>}
+                  Qty {job.quantity ?? '—'}{job.customer && <> · {String(job.customer).split(' - ')[0]}</>}{due && <> · Due {due}</>}
                 </p>
-                <p className="text-xs text-stone-600 mt-0.5 hidden sm:block">PO {job.po_number}</p>
               </div>
 
               <div className="hidden sm:block w-14 text-center font-mono text-lg font-bold tabular-nums">{job.quantity ?? '—'}</div>
@@ -197,9 +201,9 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
 
 function Tile({ n, label, stripe }) {
   return (
-    <div className="relative bg-stone-900 border border-stone-800 rounded-xl px-3 py-2 overflow-hidden">
+    <div className="relative bg-stone-900 border border-stone-800 rounded-xl px-3 py-2.5 overflow-hidden">
       <span className={`absolute left-0 top-0 bottom-0 w-1 ${stripe}`} />
-      <p className="text-xl sm:text-2xl font-extrabold tabular-nums leading-none">{n}</p>
+      <p className="text-2xl sm:text-3xl font-extrabold tabular-nums leading-none">{n}</p>
       <p className="text-[10px] uppercase tracking-wider text-stone-500 font-semibold mt-1 leading-tight truncate">{label}</p>
     </div>
   )
