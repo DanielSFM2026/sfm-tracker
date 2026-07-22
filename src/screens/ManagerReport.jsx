@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   loadManagerReport, fetchBreakRules, fetchAssemblyLines, fetchJobEventsCount,
   pauseJob, resumeJob, completeJob, rebalanceEmployeeSplit,
@@ -15,6 +15,54 @@ import ManagerWeeklyPlan from '../components/ManagerWeeklyPlan'
 
 const REFRESH_MS      = 10_000   // change-probe cadence (tiny request)
 const FULL_REFRESH_MS = 60_000   // full reload at least this often
+
+// A job stays "active" as long as its last event is START/RESUME with nothing
+// closing it — if a device dies or a tab gets killed mid-shift, that interval
+// never gets a PAUSE/AUTO_LOGOUT and just keeps accruing hours silently.
+// Flag anything open longer than a normal shift so it gets caught within a
+// day, not two weeks later.
+const STALE_HOURS = 16
+
+// Walk the already-loaded live report for any active job/team-member whose
+// current (still open) interval has run past STALE_HOURS. No extra queries —
+// this reuses the same data already rendered on the Live Overview.
+function findStaleSessions(report) {
+  if (!report) return []
+  const now = Date.now()
+  const out = []
+
+  for (const dept of Object.keys(report.individual)) {
+    for (const { emp, jobs } of report.individual[dept]) {
+      for (const job of jobs) {
+        if (!job.isActive) continue
+        const last = job.events[job.events.length - 1]
+        const hours = (now - new Date(last.event_timestamp).getTime()) / 3_600_000
+        if (hours >= STALE_HOURS) {
+          out.push({ kind: 'worker', dept, emp, job, hours })
+        }
+      }
+    }
+  }
+
+  for (const [lineId, jobs] of Object.entries(report.assembly)) {
+    for (const entry of jobs) {
+      for (const m of entry.team) {
+        const last = m.events[m.events.length - 1]
+        if (!last || (last.event_type !== 'START' && last.event_type !== 'RESUME')) continue
+        const hours = (now - new Date(last.event_timestamp).getTime()) / 3_600_000
+        if (hours >= STALE_HOURS) {
+          out.push({
+            kind: 'assembly', lineId, memberName: m.full_name, hours,
+            job: entry.job, members: entry.members, isActive: entry.isActive, holdReason: entry.holdReason,
+          })
+        }
+      }
+    }
+  }
+
+  out.sort((a, b) => b.hours - a.hours)
+  return out
+}
 
 const DEPT_LABEL = {
   weld:     'Weld Shop',
@@ -1331,6 +1379,8 @@ export default function ManagerReport({ onBack }) {
     ? Object.values(report.individual).flat().filter(({ jobs }) => jobs.some(j => j.isActive)).length
     : 0
 
+  const staleSessions = useMemo(() => findStaleSessions(report), [report])
+
   return (
     <div className="flex flex-col min-h-screen bg-stone-950">
 
@@ -1364,12 +1414,17 @@ export default function ManagerReport({ onBack }) {
       <div className="bg-stone-900 border-b border-stone-700 flex shrink-0">
         {[['live', 'Live Overview'], ['queue', 'Weekly Plan'], ['plan', 'Plan'], ['history', 'History']].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)}
-            className={`flex-1 py-3 text-sm font-semibold transition-colors ${
+            className={`flex-1 py-3 text-sm font-semibold transition-colors flex items-center justify-center gap-1.5 ${
               tab === key
                 ? 'text-amber-400 border-b-2 border-amber-400'
                 : 'text-stone-500 hover:text-stone-300'
             }`}>
             {label}
+            {key === 'live' && staleSessions.length > 0 && (
+              <span className="bg-red-600 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">
+                {staleSessions.length}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -1400,6 +1455,45 @@ export default function ManagerReport({ onBack }) {
 
         {report && !loading && (
           <>
+            {/* ── Stale sessions — active jobs left open past a normal shift ── */}
+            {staleSessions.length > 0 && (
+              <div className="bg-red-950/30 rounded-2xl border border-red-800 overflow-hidden">
+                <div className="flex items-center gap-2 px-4 py-3 border-b border-red-800/60">
+                  <span className="text-red-400">⚠</span>
+                  <h2 className="text-sm font-bold uppercase tracking-widest text-red-300">Stale Sessions</h2>
+                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-red-600/30 text-red-300">
+                    {staleSessions.length}
+                  </span>
+                  <span className="text-xs text-red-400/70 ml-auto hidden sm:block">
+                    Active {STALE_HOURS}h+ without a pause — likely a missed clock-off
+                  </span>
+                </div>
+                {staleSessions.map((s, i) => (
+                  <button key={i}
+                    onClick={() => setActionModal(
+                      s.kind === 'worker'
+                        ? { type: 'worker', emp: s.emp, job: s.job }
+                        : { type: 'assembly', job: s.job, lineId: s.lineId, lineName: lineMap[s.lineId] ?? `Line ${s.lineId}`, members: s.members, isActive: s.isActive, holdReason: s.holdReason }
+                    )}
+                    className="w-full flex items-center gap-3 px-4 py-3 border-t border-red-900/40 hover:bg-red-900/20 transition-colors text-left"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-stone-100 font-semibold truncate">
+                        {s.kind === 'worker' ? s.emp.full_name : s.memberName}
+                      </p>
+                      <p className="text-stone-400 text-sm truncate">
+                        PO {s.job.po_number} &nbsp;·&nbsp; {s.job.part_number}
+                      </p>
+                    </div>
+                    <span className="text-red-300 font-mono font-bold text-lg tabular-nums shrink-0">
+                      {Math.floor(s.hours)}h
+                    </span>
+                    <span className="text-stone-600 text-xs shrink-0">›</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* ── Kitting ──────────────────────────────────────────────── */}
             {(() => {
               const workers = report.individual.kitting ?? []
