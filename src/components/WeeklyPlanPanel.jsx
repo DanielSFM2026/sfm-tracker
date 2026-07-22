@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  fetchDeptPlan, fetchDeptJobStatuses, fetchDeptActiveWork, fetchWeldProgressMap,
+  fetchDeptPlan, fetchDeptJobStatuses, fetchDeptActiveWork, fetchWeldCellStatus,
   isoWeek, jobKey, asWeek, WELD_CELLS, WELD_CELL_LABEL,
 } from '../lib/plan'
 
@@ -26,6 +26,9 @@ const STATE = {
 // completed at the very bottom. Within a group, by customer then part number.
 const STATE_RANK = { wip: 0, ready: 1, waiting: 2, done: 3 }
 
+// Default shape for a weld job that has no job_events yet — all 4 cells pending.
+const PENDING_CELLS = Object.fromEntries(WELD_CELLS.map(c => [c, { state: 'pending', name: null }]))
+
 function useClock() {
   const [t, setT] = useState(() => new Date())
   useEffect(() => { const id = setInterval(() => setT(new Date()), 15000); return () => clearInterval(id) }, [])
@@ -41,7 +44,7 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
   const [plan, setPlan]         = useState(null)
   const [statuses, setStatuses] = useState(new Map())
   const [activeWork, setActiveWork] = useState(new Map())
-  const [weldProgress, setWeldProgress] = useState(new Map())
+  const [cellStatus, setCellStatus] = useState(new Map())
   const [error, setError]       = useState('')
   const [weekIdx, setWeekIdx]   = useState(0)
   const clock = useClock()
@@ -52,11 +55,11 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
       fetchDeptPlan(department),
       fetchDeptJobStatuses(department).catch(() => new Map()),
       fetchDeptActiveWork(department).catch(() => new Map()),
-      department === 'weld' ? fetchWeldProgressMap().catch(() => new Map()) : Promise.resolve(new Map()),
+      department === 'weld' ? fetchWeldCellStatus().catch(() => new Map()) : Promise.resolve(new Map()),
     ])
-      .then(([res, st, active, progress]) => {
+      .then(([res, st, active, cells]) => {
         if (!alive) return
-        setPlan(res); setStatuses(st); setActiveWork(active); setWeldProgress(progress)
+        setPlan(res); setStatuses(st); setActiveWork(active); setCellStatus(cells)
         const wk = isoWeek()
         let idx = res.weeks.indexOf(wk)
         if (idx === -1) idx = res.weeks.findIndex(w => w >= wk)
@@ -171,8 +174,11 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
           const onList = activeKeys?.has(jobKey(job.po_number, job.part_number))
           const canStart = job._state !== 'done'
           const key      = jobKey(job.po_number, job.part_number)
-          const workers  = job._state === 'wip' ? (activeWork.get(key) ?? []) : []
-          const doneCells = department === 'weld' ? (weldProgress.get(key) ?? new Set()) : null
+          const isWeld   = department === 'weld'
+          const workers  = !isWeld && job._state === 'wip' ? (activeWork.get(key) ?? []) : []
+          // A job with no events at all has no cellStatus entry yet — default
+          // to all-pending so the 4 pills always show, even untouched.
+          const cells    = isWeld ? (cellStatus.get(key) ?? PENDING_CELLS) : null
           return (
             <div key={job.seq_no ?? `${job.po_number}-${job.part_number}`}
               className={`flex items-center gap-3 rounded-xl bg-stone-900 border border-stone-800 border-l-4 ${s.row} pl-3 pr-3 py-2.5`}>
@@ -190,22 +196,29 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
                 </div>
                 {job.description && <p className="text-sm text-stone-400 truncate mt-1">{job.description}</p>}
 
-                {/* Weld progress grid — what's done, what's left (Tack/Weld × Parts/Frames) */}
-                {doneCells && doneCells.size > 0 && (
+                {/* Weld: 4 fixed cells (Tack/Weld × Parts/Frames), always shown —
+                    grey = untouched, amber = someone's on it now (named), green =
+                    done (named). The person's name lives right on their cell. */}
+                {cells && (
                   <div className="flex flex-wrap gap-1 mt-1.5">
-                    {WELD_CELLS.map(c => (
-                      <span key={c} className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
-                        doneCells.has(c)
-                          ? 'text-emerald-400 bg-emerald-500/15 border-emerald-700/50'
-                          : 'text-stone-500 bg-stone-800/60 border-stone-700'
-                      }`}>
-                        {doneCells.has(c) ? '✓ ' : ''}{WELD_CELL_LABEL[c]}
-                      </span>
-                    ))}
+                    {WELD_CELLS.map(c => {
+                      const cell = cells[c]
+                      const cls = cell.state === 'done'
+                        ? 'text-emerald-400 bg-emerald-500/15 border-emerald-700/50'
+                        : cell.state === 'active'
+                        ? 'text-amber-300 bg-amber-500/15 border-amber-600/50'
+                        : 'text-stone-500 bg-stone-800/60 border-stone-700'
+                      return (
+                        <span key={c} className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${cls}`}>
+                          {cell.state === 'done' ? '✓ ' : ''}{WELD_CELL_LABEL[c]}
+                          {cell.name && <span className="opacity-80"> — {cell.name}</span>}
+                        </span>
+                      )
+                    })}
                   </div>
                 )}
 
-                {/* Who's on it right now — one line per person, with their task */}
+                {/* Kitting/Assembly: who's on it right now — one line per person */}
                 {workers.length > 0 && (
                   <div className="mt-1 space-y-0.5">
                     {workers.map((w, i) => (

@@ -162,30 +162,61 @@ export const WELD_CELL_LABEL = { tack_parts: 'Tack · Parts', tack_frames: 'Tack
 const expandActivity = a => a === 'tack_weld' ? ['tack', 'weld'] : a ? [a] : []
 const expandWork     = w => w === 'parts_frames' ? ['parts', 'frames'] : w ? [w] : []
 
-// jobKey(po, part) -> Set of completed cell keys (subset of WELD_CELLS).
-export async function fetchWeldProgressMap() {
+// jobKey(po, part) -> { tack_parts: {state, name}, ... } for all 4 WELD_CELLS.
+// state is 'pending' (nobody's touched it), 'active' (someone's on it right
+// now), or 'done' (completed) — each cell always present so the UI can show
+// a fixed 4-pill row per job, not just the cells someone's worked.
+export async function fetchWeldCellStatus() {
   const pageSize = 1000
   let rows = []
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabase
       .from('job_events')
-      .select('activity_type, work_type, jobs!inner ( po_number, part_number, department )')
+      .select(`
+        job_id, employee_id, event_type, activity_type, work_type, event_timestamp,
+        jobs!inner ( po_number, part_number, department ),
+        employees ( full_name )
+      `)
       .eq('jobs.department', 'weld')
-      .eq('event_type', 'COMPLETE')
+      .in('event_type', ['START', 'RESUME', 'PAUSE', 'COMPLETE', 'AUTO_LOGOUT'])
+      .order('event_timestamp', { ascending: true })
       .range(from, from + pageSize - 1)
     if (error) throw error
     rows = rows.concat(data ?? [])
     if (!data || data.length < pageSize) break
   }
+
   const map = new Map()
+  function ensure(k) {
+    if (!map.has(k)) {
+      const cells = {}
+      for (const c of WELD_CELLS) cells[c] = { state: 'pending', name: null }
+      map.set(k, cells)
+    }
+    return map.get(k)
+  }
+
+  // Completions first, chronologically — the most recent COMPLETE on a cell wins.
   for (const r of rows) {
-    if (!r.jobs) continue
-    const k = jobKey(r.jobs.po_number, r.jobs.part_number)
-    if (!map.has(k)) map.set(k, new Set())
-    const set = map.get(k)
+    if (r.event_type !== 'COMPLETE' || !r.jobs) continue
+    const cells = ensure(jobKey(r.jobs.po_number, r.jobs.part_number))
     for (const a of expandActivity(r.activity_type))
       for (const w of expandWork(r.work_type))
-        set.add(`${a}_${w}`)
+        cells[`${a}_${w}`] = { state: 'done', name: r.employees?.full_name ?? 'Unknown' }
+  }
+
+  // Then who's currently active — only fills cells that aren't already done.
+  const lastByPair = new Map()
+  for (const r of rows) lastByPair.set(`${r.job_id}_${r.employee_id}`, r)
+  for (const r of lastByPair.values()) {
+    if (r.event_type !== 'START' && r.event_type !== 'RESUME') continue
+    if (!r.jobs) continue
+    const cells = ensure(jobKey(r.jobs.po_number, r.jobs.part_number))
+    for (const a of expandActivity(r.activity_type))
+      for (const w of expandWork(r.work_type)) {
+        const key = `${a}_${w}`
+        if (cells[key].state !== 'done') cells[key] = { state: 'active', name: r.employees?.full_name ?? 'Unknown' }
+      }
   }
   return map
 }
