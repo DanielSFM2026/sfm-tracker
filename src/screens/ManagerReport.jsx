@@ -102,6 +102,7 @@ function ManagerActionModal({ action, onClose, onDone }) {
   const [error, setError]               = useState('')
   const [localMembers, setLocalMembers] = useState(() => action.members ?? [])
   const [deleteJobArm, setDeleteJobArm] = useState(false)
+  const [editingRecord, setEditingRecord] = useState(null)   // record passed to EditTimestampsModal
 
   const { type, emp, job, lineId, members } = action
   const isAssembly = type === 'assembly'
@@ -282,6 +283,7 @@ function ManagerActionModal({ action, onClose, onDone }) {
   }
 
   return (
+    <>
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4">
       <div className="bg-stone-800 border border-stone-600 rounded-2xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto">
 
@@ -313,16 +315,26 @@ function ManagerActionModal({ action, onClose, onDone }) {
                     <span className={`text-sm ${active ? 'text-stone-200' : 'text-stone-500'}`}>
                       {m.full_name}
                     </span>
-                    <button
-                      disabled={!!busyMember || busy}
-                      onClick={() => handleToggleMember(m)}
-                      className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                        active
-                          ? 'border-orange-700 bg-orange-950/40 text-orange-400 hover:bg-orange-900/60'
-                          : 'border-amber-700/50 bg-amber-950/30 text-amber-500 hover:bg-amber-900/40'
-                      }`}>
-                      {busyMember === m.employee_id ? '…' : active ? 'Clock Off' : 'Clock On'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setEditingRecord({
+                          job_id: job.job_id, employee_id: m.employee_id, department: 'assembly',
+                          full_name: m.full_name, po_number: job.po_number, part_number: job.part_number,
+                        })}
+                        className="text-xs text-amber-500 underline hover:text-amber-300">
+                        Edit log
+                      </button>
+                      <button
+                        disabled={!!busyMember || busy}
+                        onClick={() => handleToggleMember(m)}
+                        className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                          active
+                            ? 'border-orange-700 bg-orange-950/40 text-orange-400 hover:bg-orange-900/60'
+                            : 'border-amber-700/50 bg-amber-950/30 text-amber-500 hover:bg-amber-900/40'
+                        }`}>
+                        {busyMember === m.employee_id ? '…' : active ? 'Clock Off' : 'Clock On'}
+                      </button>
+                    </div>
                   </div>
                 )
               })}
@@ -408,6 +420,18 @@ function ManagerActionModal({ action, onClose, onDone }) {
                 </>
               )
             )}
+            {/* Fix the historical log directly — same tool as History → Edit,
+                reachable here so a stale/wrong session can be corrected on the spot */}
+            {!isAssembly && (
+              <button disabled={busy}
+                className="w-full py-3 rounded-xl border border-stone-600 bg-stone-700/40 text-stone-300 text-base hover:bg-stone-700"
+                onClick={() => setEditingRecord({
+                  job_id: job.job_id, employee_id: emp.employee_id, department: emp.department,
+                  full_name: emp.full_name, po_number: job.po_number, part_number: job.part_number,
+                })}>
+                📝 Edit Log
+              </button>
+            )}
             {/* Add Worker only makes sense for assembly (shared team jobs) */}
             {isAssembly && (
               <button disabled={busy}
@@ -434,6 +458,14 @@ function ManagerActionModal({ action, onClose, onDone }) {
         {busy && <p className="text-stone-500 text-xs text-center mt-3 animate-pulse">Working…</p>}
       </div>
     </div>
+    {editingRecord && (
+      <EditTimestampsModal
+        record={editingRecord}
+        onClose={() => setEditingRecord(null)}
+        onSaved={() => { setEditingRecord(null); onDone() }}
+      />
+    )}
+    </>
   )
 }
 
