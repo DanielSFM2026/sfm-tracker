@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   fetchDeptPlan, fetchDeptJobStatuses, fetchDeptActiveWork, fetchWeldCellStatus,
-  isoWeek, jobKey, asWeek, WELD_CELLS, WELD_CELL_LABEL,
+  isoWeek, jobKey, asWeek, WELD_CELLS, WELD_CELL_LABEL, customerColor,
 } from '../lib/plan'
 import AssignWorkerModal from './AssignWorkerModal'
 
@@ -48,6 +48,7 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
   const [cellStatus, setCellStatus] = useState(new Map())
   const [error, setError]       = useState('')
   const [weekIdx, setWeekIdx]   = useState(0)
+  const [search, setSearch]     = useState('')
   const [assignJob, setAssignJob] = useState(null)   // job being assigned a worker (manager mode)
   const clock = useClock()
 
@@ -92,16 +93,32 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
     return 'ready'
   }
 
+  const q = search.trim().toLowerCase()
+  const searching = q.length > 0
+
   const jobs = useMemo(() => {
-    if (week == null || !plan) return []
-    const list = (plan.byWeek.get(week) ?? []).map(j => ({ ...j, _state: stateOf(j) }))
+    if (!plan) return []
+    // With text in the search box, look across every week — not just the one
+    // selected — since the point is finding a job when you don't know its week.
+    const source = searching ? [...plan.byWeek.values()].flat() : (week != null ? plan.byWeek.get(week) ?? [] : [])
+    let list = source.map(j => ({ ...j, _state: stateOf(j) }))
+    if (searching) {
+      list = list.filter(j =>
+        String(j.part_number ?? '').toLowerCase().includes(q) ||
+        String(j.po_number ?? '').toLowerCase().includes(q) ||
+        String(j.description ?? '').toLowerCase().includes(q) ||
+        String(j.customer ?? '').toLowerCase().includes(q) ||
+        String(j.model ?? '').toLowerCase().includes(q)
+      )
+    }
     list.sort((a, b) =>
       (STATE_RANK[a._state] - STATE_RANK[b._state]) ||
+      (searching ? a.planned_week - b.planned_week : 0) ||
       String(a.customer ?? '').localeCompare(String(b.customer ?? '')) ||
       String(a.part_number ?? '').localeCompare(String(b.part_number ?? ''))
     )
     return list
-  }, [plan, week, statuses])
+  }, [plan, week, statuses, q, searching])
 
   const counts = useMemo(() => {
     const c = { total: jobs.length, wip: 0, ready: 0, waiting: 0, done: 0 }
@@ -124,18 +141,19 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
 
         {/* Week selector */}
         <div className="flex items-center gap-1.5 bg-stone-950 border border-stone-700 rounded-2xl px-1.5 py-1 shrink-0">
-          <button disabled={weekIdx <= 0} onClick={() => setWeekIdx(i => Math.max(0, i - 1))}
+          <button disabled={searching || weekIdx <= 0} onClick={() => setWeekIdx(i => Math.max(0, i - 1))}
             className="w-10 h-10 rounded-xl bg-stone-800 border border-stone-700 text-2xl disabled:opacity-30">‹</button>
           <div className="text-center px-1">
             <p className="text-[9px] uppercase tracking-widest text-stone-500 leading-none">Week</p>
             <select
               value={week ?? ''}
+              disabled={searching}
               onChange={e => setWeekIdx(Math.max(0, weeks.indexOf(+e.target.value)))}
-              className="bg-transparent text-2xl font-extrabold text-amber-400 tabular-nums text-center outline-none cursor-pointer appearance-none">
+              className="bg-transparent text-2xl font-extrabold text-amber-400 tabular-nums text-center outline-none cursor-pointer appearance-none disabled:opacity-40">
               {weeks.map(w => <option key={w} value={w} className="bg-stone-900">{w}</option>)}
             </select>
           </div>
-          <button disabled={weekIdx >= weeks.length - 1} onClick={() => setWeekIdx(i => Math.min(weeks.length - 1, i + 1))}
+          <button disabled={searching || weekIdx >= weeks.length - 1} onClick={() => setWeekIdx(i => Math.min(weeks.length - 1, i + 1))}
             className="w-10 h-10 rounded-xl bg-stone-800 border border-stone-700 text-2xl disabled:opacity-30">›</button>
         </div>
 
@@ -149,11 +167,32 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
 
       {/* Summary tiles */}
       <div className="shrink-0 px-3 py-2.5 grid grid-cols-3 sm:grid-cols-5 gap-2 border-b border-stone-800">
-        <Tile n={counts.total} label="Jobs this week" stripe="bg-stone-500" />
+        <Tile n={counts.total} label={searching ? 'Matches' : 'Jobs this week'} stripe="bg-stone-500" />
         <Tile n={counts.wip}     label="In progress"   stripe={STATE.wip.tile} />
         <Tile n={counts.ready}   label={ui.ready}       stripe={STATE.ready.tile} />
         <Tile n={counts.waiting} label={ui.waitLabel}   stripe={STATE.waiting.tile} />
         <Tile n={counts.done}    total={counts.total} label={ui.done}        stripe={STATE.done.tile} />
+      </div>
+
+      {/* Search — across every week when there's text in it */}
+      <div className="shrink-0 px-3 py-2 border-b border-stone-800">
+        <div className="relative">
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search part, PO, customer, description…"
+            className="w-full bg-stone-900 border border-stone-700 focus:border-amber-500 rounded-xl pl-9 pr-9 py-2.5 text-stone-100 text-sm outline-none placeholder-stone-600"
+          />
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500">🔍</span>
+          {search && (
+            <button onClick={() => setSearch('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-500 hover:text-stone-300 text-sm">✕</button>
+          )}
+        </div>
+        {searching && (
+          <p className="text-xs text-stone-500 mt-1.5">{jobs.length} match{jobs.length === 1 ? '' : 'es'} across all weeks</p>
+        )}
       </div>
 
       {/* Column header */}
@@ -201,6 +240,7 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
                 <div className="flex items-center gap-1.5 mt-1">
                   <span className="text-[10px] uppercase tracking-widest text-stone-500 font-bold">PO</span>
                   <span className="font-mono font-bold text-amber-300 text-base sm:text-lg leading-none">{job.po_number}</span>
+                  {searching && <span className="text-[10px] text-stone-500 font-semibold">wk {job.planned_week}</span>}
                 </div>
                 {job.description && <p className="text-sm text-stone-400 truncate mt-1">{job.description}</p>}
 
@@ -255,13 +295,23 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
                     ))}
                   </div>
                 )}
-                <p className="text-xs text-stone-500 mt-0.5 sm:hidden">
-                  Qty {job.quantity ?? '—'}{job.customer && <> · {String(job.customer).split(' - ')[0]}</>}{due && <> · Due {due}</>}
+                <p className="text-xs text-stone-500 mt-0.5 sm:hidden flex items-center gap-1.5 flex-wrap">
+                  <span>Qty {job.quantity ?? '—'}</span>
+                  {job.customer && (
+                    <span className="inline-flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: customerColor(job.customer) }} />
+                      {String(job.customer).split(' - ')[0]}
+                    </span>
+                  )}
+                  {due && <span>Due {due}</span>}
                 </p>
               </div>
 
               <div className="hidden sm:block w-14 text-center font-mono text-lg font-bold tabular-nums">{job.quantity ?? '—'}</div>
-              <div className="hidden md:block w-40 text-sm font-semibold truncate">{job.customer ? String(job.customer).split(' - ')[0] : '—'}</div>
+              <div className="hidden md:flex items-center gap-1.5 w-40 text-sm font-semibold truncate">
+                {job.customer && <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: customerColor(job.customer) }} />}
+                <span className="truncate">{job.customer ? String(job.customer).split(' - ')[0] : '—'}</span>
+              </div>
               <div className="hidden sm:block w-24 text-center font-mono text-sm">{due || '—'}</div>
 
               <div className="w-32 shrink-0 flex flex-col items-center gap-1">

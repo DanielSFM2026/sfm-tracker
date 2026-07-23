@@ -277,6 +277,19 @@ export function asWeek(value) {
   return weekNumber(value)
 }
 
+// A stable colour per customer, generated in-app rather than read from the
+// Excel cell fill — the sheet's manual colouring isn't reliably exposed
+// through the sync, and this way every customer gets a colour even if the
+// sheet never coloured them. Same name always gives the same hue.
+export function customerColor(customer) {
+  const name = String(customer ?? '').split(' - ')[0].trim().toUpperCase()
+  if (!name) return 'hsl(0, 0%, 40%)'
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0
+  const hue = Math.abs(hash) % 360
+  return `hsl(${hue}, 62%, 52%)`
+}
+
 // All build_plan rows with every planned + completed week column — for the
 // manager plan dashboard (load per week, late jobs, completed per week).
 export async function fetchPlanRows() {
