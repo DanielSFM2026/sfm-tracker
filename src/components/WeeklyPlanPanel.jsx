@@ -200,7 +200,6 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
         <span className="flex-1">Part / Description</span>
         <span className="w-14 text-center">Qty</span>
         <span className="hidden md:block w-40">Customer</span>
-        <span className="w-24 text-center">Due</span>
         <span className="w-32 text-center">{embedded ? 'Status' : 'Action'}</span>
       </div>
 
@@ -217,7 +216,6 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
 
         {jobs.map(job => {
           const s   = STATE[job._state]
-          const due = job.customer_req_date || job.original_date
           const onList = activeKeys?.has(jobKey(job.po_number, job.part_number))
           const canStart = job._state !== 'done'
           const key      = jobKey(job.po_number, job.part_number)
@@ -226,9 +224,36 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
           // A job with no events at all has no cellStatus entry yet — default
           // to all-pending so the 4 pills always show, even untouched.
           const cells    = isWeld ? (cellStatus.get(key) ?? PENDING_CELLS) : null
+
+          // Rendered once, used both in the mobile bottom bar and the desktop
+          // action column — a job is either actionable (Assign/Start/Open) or
+          // already done. No need to repeat the state pill a second time here;
+          // it's already shown up top next to the part number.
+          const actionEl = embedded ? (
+            canStart ? (
+              <button onClick={() => setAssignJob(job)}
+                className="px-4 py-2 rounded-lg border border-stone-600 bg-stone-800 text-stone-300 text-xs font-semibold hover:bg-stone-700 shrink-0">
+                + Assign
+              </button>
+            ) : (
+              <span className="px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-700/40 shrink-0">✓ {ui.done}</span>
+            )
+          ) : canStart ? (
+            <button onClick={() => onPick(job.po_number, job.part_number)}
+              className={`px-5 py-2.5 rounded-xl font-bold text-sm active:scale-95 transition-transform shrink-0 ${
+                job._state === 'wip'
+                  ? 'bg-amber-500 hover:bg-amber-400 text-stone-950'
+                  : 'bg-blue-500 hover:bg-blue-400 text-white'
+              }`}>
+              {job._state === 'wip' ? 'Open' : '▶ Start'}
+            </button>
+          ) : (
+            <span className="px-4 py-2 rounded-xl text-center font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-700/40 text-sm shrink-0">✓ {ui.done}</span>
+          )
+
           return (
             <div key={job.seq_no ?? `${job.po_number}-${job.part_number}`}
-              className={`flex items-center gap-3 rounded-xl bg-stone-900 border border-stone-800 border-l-4 ${s.row} pl-3 pr-3 py-2.5`}>
+              className={`flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 rounded-xl bg-stone-900 border border-stone-800 border-l-4 ${s.row} p-3`}>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-mono text-lg font-bold">{job.part_number}</span>
@@ -295,16 +320,18 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
                     ))}
                   </div>
                 )}
-                <p className="text-xs text-stone-500 mt-0.5 sm:hidden flex items-center gap-1.5 flex-wrap">
-                  <span>Qty {job.quantity ?? '—'}</span>
+
+                {/* Mobile-only bottom bar: qty + customer on the left, action on the right */}
+                <div className="flex items-center gap-2 mt-2 sm:hidden">
+                  <span className="text-xs text-stone-500 shrink-0">Qty {job.quantity ?? '—'}</span>
                   {job.customer && (
                     <span className="inline-block text-[11px] font-bold px-2 py-0.5 rounded-full border truncate"
                       style={customerPillStyle(job.customer)}>
                       {String(job.customer).split(' - ')[0]}
                     </span>
                   )}
-                  {due && <span>Due {due}</span>}
-                </p>
+                  <div className="ml-auto">{actionEl}</div>
+                </div>
               </div>
 
               <div className="hidden sm:block w-14 text-center font-mono text-lg font-bold tabular-nums">{job.quantity ?? '—'}</div>
@@ -318,34 +345,8 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
                   <span className="text-sm text-stone-500">—</span>
                 )}
               </div>
-              <div className="hidden sm:block w-24 text-center font-mono text-sm">{due || '—'}</div>
 
-              <div className="w-32 shrink-0 flex flex-col items-center gap-1">
-                {embedded ? (
-                  <>
-                    <span className={`w-full py-2.5 rounded-xl text-center text-xs font-semibold uppercase tracking-wide ${s.pill}`}>
-                      {stateLabel[job._state]}
-                    </span>
-                    {canStart && (
-                      <button onClick={() => setAssignJob(job)}
-                        className="w-full py-1.5 rounded-lg border border-stone-600 bg-stone-800 text-stone-300 text-xs font-semibold hover:bg-stone-700">
-                        + Assign
-                      </button>
-                    )}
-                  </>
-                ) : canStart ? (
-                  <button onClick={() => onPick(job.po_number, job.part_number)}
-                    className={`w-full py-3 rounded-xl font-bold text-base active:scale-95 transition-transform ${
-                      job._state === 'wip'
-                        ? 'bg-amber-500 hover:bg-amber-400 text-stone-950'
-                        : 'bg-blue-500 hover:bg-blue-400 text-white'
-                    }`}>
-                    {job._state === 'wip' ? 'Open' : '▶ Start'}
-                  </button>
-                ) : (
-                  <span className="w-full py-3 rounded-xl text-center font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-700/40">✓ {ui.done}</span>
-                )}
-              </div>
+              <div className="hidden sm:flex w-32 shrink-0 justify-center">{actionEl}</div>
             </div>
           )
         })}
