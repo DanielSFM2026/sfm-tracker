@@ -189,6 +189,40 @@ export async function fetchDeptActiveEmployees(department) {
   return map
 }
 
+// Which assembly line each job is currently on — so the Weekly Plan can group
+// jobs by line the same way Live Overview does. Keyed by jobKey(po, part);
+// takes the most recent event that carries a line_id (ascending order, last
+// write wins), since a job stays on one line for its life in practice.
+export async function fetchDeptJobLines(department) {
+  const pageSize = 1000
+  let rows = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from('job_events')
+      .select('job_id, line_id, event_timestamp, jobs!inner ( po_number, part_number, department )')
+      .eq('jobs.department', department)
+      .not('line_id', 'is', null)
+      .order('event_timestamp', { ascending: true })
+      .range(from, from + pageSize - 1)
+    if (error) throw error
+    rows = rows.concat(data ?? [])
+    if (!data || data.length < pageSize) break
+  }
+  const map = new Map()
+  for (const r of rows) {
+    if (!r.jobs) continue
+    map.set(jobKey(r.jobs.po_number, r.jobs.part_number), r.line_id)
+  }
+  return map
+}
+
+// line_id -> line_name, for labelling the groups above.
+export async function fetchAssemblyLineNames() {
+  const { data, error } = await supabase.from('assembly_lines').select('line_id, line_name').order('line_id')
+  if (error) throw error
+  return new Map((data ?? []).map(l => [l.line_id, l.line_name]))
+}
+
 // ── Weld machine progress (Tack/Weld × Parts/Frames) ─────────────────────────
 // Mirrors getWeldProgress in db.js (kept in sync manually — see WELD_CELLS
 // there): a weld machine is fully done once every activity×work-type cell has
