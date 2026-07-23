@@ -508,6 +508,8 @@ function AddJobModal({ onClose, onDone }) {
 
   // weld / kitting / paint
   const [target, setTarget] = useState(null)
+  const [activityType, setActivityType] = useState(null)   // weld only: tack / weld / tack_weld
+  const [workType, setWorkType]         = useState(null)    // weld only: parts / frames / parts_frames
 
   // assembly
   const [lines, setLines]           = useState([])
@@ -516,6 +518,8 @@ function AddJobModal({ onClose, onDone }) {
   const [selectedIds, setSelectedIds] = useState(new Set())
 
   const isAssembly = dept === 'assembly'
+  const isWeld     = dept === 'weld'
+  const ACTIVITY_LABEL = { tack: 'Tack', weld: 'Weld', tack_weld: 'Tack & Weld' }
 
   async function selectDept(d) {
     setDept(d); setError('')
@@ -556,7 +560,7 @@ function AddJobModal({ onClose, onDone }) {
         }
       }
       const ts = localInputToISO(startTime)
-      await managerStartWorkerOnJob(target.employee_id, job.job_id, null, ts)
+      await managerStartWorkerOnJob(target.employee_id, job.job_id, null, ts, activityType, workType)
       onDone()
     } catch (e) {
       console.error(e); setError('Failed to create job.')
@@ -614,7 +618,7 @@ function AddJobModal({ onClose, onDone }) {
               ? <p className="text-stone-500 text-sm animate-pulse">Loading…</p>
               : <div className="space-y-1.5 mb-4 max-h-80 overflow-y-auto">
                   {employees.map(e => (
-                    <button key={e.employee_id} onClick={() => { setTarget(e); setStep('details') }}
+                    <button key={e.employee_id} onClick={() => { setTarget(e); setStep(isWeld ? 'activity' : 'details') }}
                       className="w-full px-4 py-3 rounded-xl bg-stone-700 hover:bg-stone-600 border border-stone-600 text-stone-200 text-sm text-left">
                       {e.full_name}
                     </button>
@@ -622,6 +626,43 @@ function AddJobModal({ onClose, onDone }) {
                 </div>
             }
             <button className="w-full text-sm text-stone-500 underline" onClick={() => setStep('dept')}>Back</button>
+          </>
+        )}
+
+        {/* Weld only — same two questions the worker's own clock-on screen asks */}
+        {step === 'activity' && (
+          <>
+            <p className="text-stone-300 text-sm mb-1">
+              What's <strong className="text-stone-100">{target?.full_name}</strong> doing?
+            </p>
+            <p className="text-stone-500 text-xs mb-4">Step 1 of 2</p>
+            <div className="flex flex-col gap-2 mb-2">
+              <button className="py-4 rounded-xl bg-amber-500/20 border border-amber-600 text-amber-300 text-lg font-semibold"
+                onClick={() => { setActivityType('tack'); setStep('work') }}>Tack</button>
+              <button className="py-4 rounded-xl bg-stone-700 border border-stone-600 text-stone-200 text-lg font-semibold"
+                onClick={() => { setActivityType('weld'); setStep('work') }}>Weld</button>
+              <button className="py-4 rounded-xl border border-stone-600 text-stone-300 text-lg"
+                onClick={() => { setActivityType('tack_weld'); setStep('work') }}>Tack &amp; Weld</button>
+            </div>
+            <button className="w-full text-sm text-stone-500 underline mt-1" onClick={() => setStep('employee')}>Back</button>
+          </>
+        )}
+
+        {step === 'work' && (
+          <>
+            <p className="text-stone-300 text-sm mb-1">Working on?</p>
+            <p className="text-stone-500 text-xs mb-4">
+              Step 2 of 2 · <span className="text-amber-400">{ACTIVITY_LABEL[activityType]}</span>
+            </p>
+            <div className="flex flex-col gap-2 mb-2">
+              <button className="py-4 rounded-xl bg-amber-500/20 border border-amber-600 text-amber-300 text-lg font-semibold"
+                onClick={() => { setWorkType('parts'); setStep('details') }}>Parts</button>
+              <button className="py-4 rounded-xl bg-stone-700 border border-stone-600 text-stone-200 text-lg font-semibold"
+                onClick={() => { setWorkType('frames'); setStep('details') }}>Frames</button>
+              <button className="py-4 rounded-xl border border-stone-600 text-stone-300 text-lg"
+                onClick={() => { setWorkType('parts_frames'); setStep('details') }}>Parts &amp; Frames</button>
+            </div>
+            <button className="w-full text-sm text-stone-500 underline mt-1" onClick={() => setStep('activity')}>Back</button>
           </>
         )}
 
@@ -685,7 +726,10 @@ function AddJobModal({ onClose, onDone }) {
         {(step === 'details' || step === 'asm_details') && (
           <>
             {step === 'details' && target && (
-              <p className="text-stone-400 text-sm mb-4">Worker: <strong className="text-stone-200">{target.full_name}</strong></p>
+              <p className="text-stone-400 text-sm mb-4">
+                Worker: <strong className="text-stone-200">{target.full_name}</strong>
+                {isWeld && <> · <span className="text-amber-400">{ACTIVITY_LABEL[activityType]}</span></>}
+              </p>
             )}
             {step === 'asm_details' && (
               <p className="text-stone-400 text-sm mb-4">
@@ -733,7 +777,7 @@ function AddJobModal({ onClose, onDone }) {
               {busy ? 'Starting…' : confirmed ? 'Confirm' : step === 'details' ? `Clock In ${target?.full_name}` : `Start Job · ${selectedIds.size} on team`}
             </button>
             <button className="w-full text-sm text-stone-500 underline"
-              onClick={() => setStep(step === 'details' ? 'employee' : 'asm_team')}>
+              onClick={() => setStep(step === 'details' ? (isWeld ? 'work' : 'employee') : 'asm_team')}>
               Back
             </button>
           </>
