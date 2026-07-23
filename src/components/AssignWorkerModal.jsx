@@ -32,9 +32,13 @@ export default function AssignWorkerModal({ department, job, onClose, onAssigned
   const [lineName, setLineName] = useState('')
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [target, setTarget] = useState(null)   // single-employee pick, non-assembly
+  const [activityType, setActivityType] = useState(null)   // weld only: tack / weld / tack_weld
+  const [workType, setWorkType] = useState(null)            // weld only: parts / frames / parts_frames
   const [startTime, setStartTime] = useState(nowLocal)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const isWeld = department === 'weld'
+  const ACTIVITY_LABEL = { tack: 'Tack', weld: 'Weld', tack_weld: 'Tack & Weld' }
 
   useEffect(() => {
     let alive = true
@@ -65,7 +69,7 @@ export default function AssignWorkerModal({ department, job, onClose, onAssigned
       if (isAssembly) {
         await managerStartAssemblyJobFull(dbJob.job_id, lineId, [...selectedIds], ts)
       } else {
-        await managerStartWorkerOnJob(target.employee_id, dbJob.job_id, null, ts)
+        await managerStartWorkerOnJob(target.employee_id, dbJob.job_id, null, ts, activityType, workType)
       }
       onAssigned()
     } catch (err) {
@@ -125,7 +129,7 @@ export default function AssignWorkerModal({ department, job, onClose, onAssigned
                   const on = selectedIds.has(e.employee_id)
                   return (
                     <button key={e.employee_id}
-                      onClick={() => isAssembly ? toggleMember(e.employee_id) : (setTarget(e), setStep('time'))}
+                      onClick={() => isAssembly ? toggleMember(e.employee_id) : (setTarget(e), setStep(isWeld ? 'activity' : 'time'))}
                       className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border text-sm text-left transition-colors ${
                         isAssembly && on
                           ? 'bg-sky-900/40 border-sky-600 text-sky-200'
@@ -159,13 +163,50 @@ export default function AssignWorkerModal({ department, job, onClose, onAssigned
           </>
         )}
 
+        {/* Weld only — same two questions the worker's own clock-on screen asks */}
+        {step === 'activity' && (
+          <>
+            <p className="text-stone-300 text-sm mb-1">
+              What's <strong className="text-stone-100">{target?.full_name}</strong> doing?
+            </p>
+            <p className="text-stone-500 text-xs mb-4">Step 1 of 2</p>
+            <div className="flex flex-col gap-2 mb-2">
+              <button className="py-4 rounded-xl bg-amber-500/20 border border-amber-600 text-amber-300 text-lg font-semibold"
+                onClick={() => { setActivityType('tack'); setStep('work') }}>Tack</button>
+              <button className="py-4 rounded-xl bg-stone-700 border border-stone-600 text-stone-200 text-lg font-semibold"
+                onClick={() => { setActivityType('weld'); setStep('work') }}>Weld</button>
+              <button className="py-4 rounded-xl border border-stone-600 text-stone-300 text-lg"
+                onClick={() => { setActivityType('tack_weld'); setStep('work') }}>Tack &amp; Weld</button>
+            </div>
+            <button className="w-full text-sm text-stone-500 underline mt-1" onClick={() => setStep('pick')}>Back</button>
+          </>
+        )}
+
+        {step === 'work' && (
+          <>
+            <p className="text-stone-300 text-sm mb-1">Working on?</p>
+            <p className="text-stone-500 text-xs mb-4">
+              Step 2 of 2 · <span className="text-amber-400">{ACTIVITY_LABEL[activityType]}</span>
+            </p>
+            <div className="flex flex-col gap-2 mb-2">
+              <button className="py-4 rounded-xl bg-amber-500/20 border border-amber-600 text-amber-300 text-lg font-semibold"
+                onClick={() => { setWorkType('parts'); setStep('time') }}>Parts</button>
+              <button className="py-4 rounded-xl bg-stone-700 border border-stone-600 text-stone-200 text-lg font-semibold"
+                onClick={() => { setWorkType('frames'); setStep('time') }}>Frames</button>
+              <button className="py-4 rounded-xl border border-stone-600 text-stone-300 text-lg"
+                onClick={() => { setWorkType('parts_frames'); setStep('time') }}>Parts &amp; Frames</button>
+            </div>
+            <button className="w-full text-sm text-stone-500 underline mt-1" onClick={() => setStep('activity')}>Back</button>
+          </>
+        )}
+
         {/* Final step: confirm start time */}
         {step === 'time' && (
           <>
             <p className="text-stone-300 text-sm mb-1">
               {isAssembly
                 ? <>{lineName} · {selectedIds.size} member{selectedIds.size !== 1 ? 's' : ''}</>
-                : <>Starting <strong className="text-stone-100">{target?.full_name}</strong></>}
+                : <>Starting <strong className="text-stone-100">{target?.full_name}</strong>{isWeld && <> · <span className="text-amber-400">{ACTIVITY_LABEL[activityType]}</span></>}</>}
             </p>
             <p className="text-stone-500 text-xs mb-4">Set the actual start time — backdate if needed.</p>
             <label className="block text-xs text-stone-500 uppercase tracking-widest mb-1">Start time</label>
@@ -177,7 +218,7 @@ export default function AssignWorkerModal({ department, job, onClose, onAssigned
               {busy ? 'Starting…' : 'Confirm & Start'}
             </button>
             <button className="w-full text-sm text-stone-500 underline"
-              onClick={() => setStep(isAssembly ? 'team' : 'pick')}>
+              onClick={() => setStep(isAssembly ? 'team' : isWeld ? 'work' : 'pick')}>
               Back
             </button>
           </>

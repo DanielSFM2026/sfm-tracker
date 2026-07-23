@@ -861,7 +861,7 @@ export async function fetchDepartmentEmployees(department) {
 // ── Manager clocks a worker onto an existing/new job ─────────────────────────
 // Pauses any currently active jobs first, then starts the new one at split=1.
 // startTime: ISO string — can be backdated by manager.
-export async function managerStartWorkerOnJob(employeeId, jobId, lineId, startTime) {
+export async function managerStartWorkerOnJob(employeeId, jobId, lineId, startTime, activityType = null, workType = null) {
   const { data: rows } = await supabase
     .from('job_events')
     .select('job_id, event_type, line_id')
@@ -891,6 +891,7 @@ export async function managerStartWorkerOnJob(employeeId, jobId, lineId, startTi
   const { error } = await supabase.from('job_events').insert({
     employee_id: employeeId, job_id: jobId, event_type: 'START',
     line_id: lineId ?? null, split_count: 1, event_timestamp: timestamp,
+    activity_type: activityType, work_type: workType,
   })
   if (error) throw error
   await setJobStatus(jobId, 'in_progress')
