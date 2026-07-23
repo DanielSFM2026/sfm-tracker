@@ -3,6 +3,7 @@ import {
   fetchDeptPlan, fetchDeptJobStatuses, fetchDeptActiveWork, fetchWeldCellStatus,
   isoWeek, jobKey, asWeek, WELD_CELLS, WELD_CELL_LABEL,
 } from '../lib/plan'
+import AssignWorkerModal from './AssignWorkerModal'
 
 // Per-department wording, plus:
 //  completed — THIS dept's completed-week column; a week number in it means the
@@ -47,26 +48,33 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
   const [cellStatus, setCellStatus] = useState(new Map())
   const [error, setError]       = useState('')
   const [weekIdx, setWeekIdx]   = useState(0)
+  const [assignJob, setAssignJob] = useState(null)   // job being assigned a worker (manager mode)
   const clock = useClock()
 
-  useEffect(() => {
-    let alive = true
-    Promise.all([
+  function loadData(keepWeek) {
+    return Promise.all([
       fetchDeptPlan(department),
       fetchDeptJobStatuses(department).catch(() => new Map()),
       fetchDeptActiveWork(department).catch(() => new Map()),
       department === 'weld' ? fetchWeldCellStatus().catch(() => new Map()) : Promise.resolve(new Map()),
-    ])
-      .then(([res, st, active, cells]) => {
-        if (!alive) return
-        setPlan(res); setStatuses(st); setActiveWork(active); setCellStatus(cells)
+    ]).then(([res, st, active, cells]) => {
+      setPlan(res); setStatuses(st); setActiveWork(active); setCellStatus(cells)
+      if (!keepWeek) {
         const wk = isoWeek()
         let idx = res.weeks.indexOf(wk)
         if (idx === -1) idx = res.weeks.findIndex(w => w >= wk)
         if (idx === -1) idx = res.weeks.length - 1
         setWeekIdx(Math.max(0, idx))
-      })
-      .catch(err => { console.error(err); if (alive) setError('Could not load the plan — check connection.') })
+      }
+    })
+  }
+
+  useEffect(() => {
+    let alive = true
+    loadData(false).catch(err => {
+      console.error(err)
+      if (alive) setError('Could not load the plan — check connection.')
+    })
     return () => { alive = false }
   }, [department])
 
@@ -256,11 +264,19 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
               <div className="hidden md:block w-40 text-sm font-semibold truncate">{job.customer ? String(job.customer).split(' - ')[0] : '—'}</div>
               <div className="hidden sm:block w-24 text-center font-mono text-sm">{due || '—'}</div>
 
-              <div className="w-32 shrink-0 flex justify-center">
+              <div className="w-32 shrink-0 flex flex-col items-center gap-1">
                 {embedded ? (
-                  <span className={`w-full py-2.5 rounded-xl text-center text-xs font-semibold uppercase tracking-wide ${s.pill}`}>
-                    {stateLabel[job._state]}
-                  </span>
+                  <>
+                    <span className={`w-full py-2.5 rounded-xl text-center text-xs font-semibold uppercase tracking-wide ${s.pill}`}>
+                      {stateLabel[job._state]}
+                    </span>
+                    {canStart && (
+                      <button onClick={() => setAssignJob(job)}
+                        className="w-full py-1.5 rounded-lg border border-stone-600 bg-stone-800 text-stone-300 text-xs font-semibold hover:bg-stone-700">
+                        + Assign
+                      </button>
+                    )}
+                  </>
                 ) : canStart ? (
                   <button onClick={() => onPick(job.po_number, job.part_number)}
                     className={`w-full py-3 rounded-xl font-bold text-base active:scale-95 transition-transform ${
@@ -278,6 +294,15 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
           )
         })}
       </div>
+
+      {assignJob && (
+        <AssignWorkerModal
+          department={department}
+          job={assignJob}
+          onClose={() => setAssignJob(null)}
+          onAssigned={() => { setAssignJob(null); loadData(true).catch(console.error) }}
+        />
+      )}
     </div>
   )
 }

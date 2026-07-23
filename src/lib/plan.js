@@ -152,6 +152,43 @@ export async function fetchDeptActiveWork(department) {
   return map
 }
 
+// Same underlying data as fetchDeptActiveWork, keyed by employee_id instead —
+// so a manager picking someone to assign can see who's already on a job.
+export async function fetchDeptActiveEmployees(department) {
+  const pageSize = 1000
+  let rows = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from('job_events')
+      .select(`
+        job_id, employee_id, event_type, activity_type, work_type, event_timestamp,
+        jobs!inner ( po_number, part_number, department )
+      `)
+      .eq('jobs.department', department)
+      .in('event_type', ['START', 'RESUME', 'PAUSE', 'COMPLETE', 'AUTO_LOGOUT'])
+      .order('event_timestamp', { ascending: true })
+      .range(from, from + pageSize - 1)
+    if (error) throw error
+    rows = rows.concat(data ?? [])
+    if (!data || data.length < pageSize) break
+  }
+
+  const lastByEmployee = new Map()
+  for (const r of rows) lastByEmployee.set(r.employee_id, r)
+
+  const map = new Map()   // employee_id -> { poNumber, partNumber, label }
+  for (const r of lastByEmployee.values()) {
+    if (r.event_type !== 'START' && r.event_type !== 'RESUME') continue
+    if (!r.jobs) continue
+    map.set(r.employee_id, {
+      poNumber: r.jobs.po_number,
+      partNumber: r.jobs.part_number,
+      label: activityLabel(r.activity_type, r.work_type),
+    })
+  }
+  return map
+}
+
 // ── Weld machine progress (Tack/Weld × Parts/Frames) ─────────────────────────
 // Mirrors getWeldProgress in db.js (kept in sync manually — see WELD_CELLS
 // there): a weld machine is fully done once every activity×work-type cell has
