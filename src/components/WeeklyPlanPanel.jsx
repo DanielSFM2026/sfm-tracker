@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   fetchDeptPlan, fetchDeptJobStatuses, fetchDeptActiveWork, fetchWeldCellStatus,
-  isoWeek, jobKey, asWeek, WELD_CELLS, WELD_CELL_LABEL, customerColor,
+  isoWeek, jobKey, asWeek, WELD_CELLS, WELD_CELL_LABEL, customerPillStyle,
 } from '../lib/plan'
 import AssignWorkerModal from './AssignWorkerModal'
 
@@ -298,8 +298,8 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
                 <p className="text-xs text-stone-500 mt-0.5 sm:hidden flex items-center gap-1.5 flex-wrap">
                   <span>Qty {job.quantity ?? '—'}</span>
                   {job.customer && (
-                    <span className="inline-flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: customerColor(job.customer) }} />
+                    <span className="inline-block text-[11px] font-bold px-2 py-0.5 rounded-full border truncate"
+                      style={customerPillStyle(job.customer)}>
                       {String(job.customer).split(' - ')[0]}
                     </span>
                   )}
@@ -308,9 +308,15 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
               </div>
 
               <div className="hidden sm:block w-14 text-center font-mono text-lg font-bold tabular-nums">{job.quantity ?? '—'}</div>
-              <div className="hidden md:flex items-center gap-1.5 w-40 text-sm font-semibold truncate">
-                {job.customer && <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: customerColor(job.customer) }} />}
-                <span className="truncate">{job.customer ? String(job.customer).split(' - ')[0] : '—'}</span>
+              <div className="hidden md:block w-40">
+                {job.customer ? (
+                  <span className="inline-block max-w-full text-xs font-bold px-2.5 py-1 rounded-full border truncate"
+                    style={customerPillStyle(job.customer)}>
+                    {String(job.customer).split(' - ')[0]}
+                  </span>
+                ) : (
+                  <span className="text-sm text-stone-500">—</span>
+                )}
               </div>
               <div className="hidden sm:block w-24 text-center font-mono text-sm">{due || '—'}</div>
 

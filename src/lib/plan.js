@@ -281,13 +281,29 @@ export function asWeek(value) {
 // Excel cell fill — the sheet's manual colouring isn't reliably exposed
 // through the sync, and this way every customer gets a colour even if the
 // sheet never coloured them. Same name always gives the same hue.
-export function customerColor(customer) {
+function customerHue(customer) {
   const name = String(customer ?? '').split(' - ')[0].trim().toUpperCase()
-  if (!name) return 'hsl(0, 0%, 40%)'
+  if (!name) return null
   let hash = 0
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0
-  const hue = Math.abs(hash) % 360
-  return `hsl(${hue}, 62%, 52%)`
+  return Math.abs(hash) % 360
+}
+
+export function customerColor(customer) {
+  const hue = customerHue(customer)
+  return hue == null ? 'hsl(0, 0%, 40%)' : `hsl(${hue}, 62%, 52%)`
+}
+
+// Inline-style trio (background/border/text) for rendering the customer as
+// a coloured pill rather than a plain dot + name.
+export function customerPillStyle(customer) {
+  const hue = customerHue(customer)
+  if (hue == null) return { backgroundColor: 'rgba(120,120,120,0.15)', borderColor: 'rgba(120,120,120,0.4)', color: '#a8a29e' }
+  return {
+    backgroundColor: `hsl(${hue}, 55%, 22%)`,
+    borderColor: `hsl(${hue}, 55%, 42%)`,
+    color: `hsl(${hue}, 85%, 78%)`,
+  }
 }
 
 // All build_plan rows with every planned + completed week column — for the
