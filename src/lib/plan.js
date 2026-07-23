@@ -277,12 +277,49 @@ export function asWeek(value) {
   return weekNumber(value)
 }
 
-// A stable colour per customer, generated in-app rather than read from the
-// Excel cell fill — the sheet's manual colouring isn't reliably exposed
-// through the sync, and this way every customer gets a colour even if the
-// sheet never coloured them. Same name always gives the same hue.
+// The exact fill colours read from the "DELIVERED TO" column of the actual
+// workbook (checked customer-by-customer — no conflicting colours found for
+// any customer across all rows). Cells with no fill (alpha 00) are omitted
+// and fall through to the hash-based fallback below. Keyed by the full raw
+// customer string, trimmed/uppercased, matching what's stored in build_plan.
+const CUSTOMER_HEX = {
+  'ASTEC - USA':                 '0070C0',
+  'ASTEC OMAGH':                 'C00000',
+  'CAMPSIE':                     'FF0000',
+  'MCCLOSKEY - GRANVILLE SITE':  '00B050',
+  'ROCO':                        'EDFD51',
+  'RUBBLE MASTER':               'FFFF99',
+  'SANDVIK':                     'FFC000',
+  'SANDVIK SPARES':              'FFC000',
+  'SFM ENGINEERING':             '5B9BD5',
+  'TESAB':                       'E6E100',
+  'TYRONE INTERNATIONAL':        '00B0F0',
+}
+
+function hexToHue(hex) {
+  const r = parseInt(hex.slice(0, 2), 16) / 255
+  const g = parseInt(hex.slice(2, 4), 16) / 255
+  const b = parseInt(hex.slice(4, 6), 16) / 255
+  const max = Math.max(r, g, b), min = Math.min(r, g, b)
+  if (max === min) return 0
+  const d = max - min
+  let h
+  if (max === r) h = ((g - b) / d) % 6
+  else if (max === g) h = (b - r) / d + 2
+  else h = (r - g) / d + 4
+  h *= 60
+  return h < 0 ? h + 360 : h
+}
+
+// A stable colour per customer. Uses the workbook's real fill colour when
+// known; otherwise falls back to one generated from the name itself, so
+// every customer still gets a consistent colour even if the sheet never
+// coloured them (or a new customer shows up before the map is updated).
 function customerHue(customer) {
-  const name = String(customer ?? '').split(' - ')[0].trim().toUpperCase()
+  const raw = String(customer ?? '').trim().toUpperCase()
+  if (!raw) return null
+  if (CUSTOMER_HEX[raw]) return hexToHue(CUSTOMER_HEX[raw])
+  const name = raw.split(' - ')[0].trim()
   if (!name) return null
   let hash = 0
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0
