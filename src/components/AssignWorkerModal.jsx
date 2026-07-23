@@ -208,13 +208,13 @@ export default function AssignWorkerModal({ department, job, onClose, onAssigned
             <p className="text-stone-500 text-xs mb-4">Step 1 of 2</p>
             <div className="flex flex-col gap-2 mb-2">
               <button disabled={!weldPlan.activityEnabled.tack}
-                className={`py-4 rounded-xl bg-amber-500/20 border border-amber-600 text-amber-300 text-lg font-semibold ${!weldPlan.activityEnabled.tack ? 'opacity-30 cursor-not-allowed' : ''}`}
+                className={`py-4 rounded-xl bg-stone-700 border border-stone-600 text-stone-200 text-lg font-semibold ${!weldPlan.activityEnabled.tack ? 'opacity-30 cursor-not-allowed' : ''}`}
                 onClick={() => { setActivityType('tack'); setStep('work') }}>Tack</button>
               <button disabled={!weldPlan.activityEnabled.weld}
                 className={`py-4 rounded-xl bg-stone-700 border border-stone-600 text-stone-200 text-lg font-semibold ${!weldPlan.activityEnabled.weld ? 'opacity-30 cursor-not-allowed' : ''}`}
                 onClick={() => { setActivityType('weld'); setStep('work') }}>Weld</button>
               <button disabled={!weldPlan.activityEnabled.tack_weld}
-                className={`py-4 rounded-xl border border-stone-600 text-stone-300 text-lg ${!weldPlan.activityEnabled.tack_weld ? 'opacity-30 cursor-not-allowed' : ''}`}
+                className={`py-4 rounded-xl bg-stone-700 border border-stone-600 text-stone-200 text-lg font-semibold ${!weldPlan.activityEnabled.tack_weld ? 'opacity-30 cursor-not-allowed' : ''}`}
                 onClick={() => { setActivityType('tack_weld'); setStep('work') }}>Tack &amp; Weld</button>
             </div>
             <button className="w-full text-sm text-stone-500 underline mt-1" onClick={() => setStep('pick')}>Back</button>
@@ -231,13 +231,13 @@ export default function AssignWorkerModal({ department, job, onClose, onAssigned
               </p>
               <div className="flex flex-col gap-2 mb-2">
                 <button disabled={!workOk.parts}
-                  className={`py-4 rounded-xl bg-amber-500/20 border border-amber-600 text-amber-300 text-lg font-semibold ${!workOk.parts ? 'opacity-30 cursor-not-allowed' : ''}`}
+                  className={`py-4 rounded-xl bg-stone-700 border border-stone-600 text-stone-200 text-lg font-semibold ${!workOk.parts ? 'opacity-30 cursor-not-allowed' : ''}`}
                   onClick={() => { setWorkType('parts'); setStep('time') }}>Parts</button>
                 <button disabled={!workOk.frames}
                   className={`py-4 rounded-xl bg-stone-700 border border-stone-600 text-stone-200 text-lg font-semibold ${!workOk.frames ? 'opacity-30 cursor-not-allowed' : ''}`}
                   onClick={() => { setWorkType('frames'); setStep('time') }}>Frames</button>
                 <button disabled={!workOk.parts_frames}
-                  className={`py-4 rounded-xl border border-stone-600 text-stone-300 text-lg ${!workOk.parts_frames ? 'opacity-30 cursor-not-allowed' : ''}`}
+                  className={`py-4 rounded-xl bg-stone-700 border border-stone-600 text-stone-200 text-lg font-semibold ${!workOk.parts_frames ? 'opacity-30 cursor-not-allowed' : ''}`}
                   onClick={() => { setWorkType('parts_frames'); setStep('time') }}>Parts &amp; Frames</button>
               </div>
               <button className="w-full text-sm text-stone-500 underline mt-1" onClick={() => setStep('activity')}>Back</button>

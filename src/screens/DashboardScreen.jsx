@@ -129,13 +129,13 @@ function JobActionModal({ onConfirm, onCancel, progress }) {
             <p className="text-stone-400 text-center text-sm mb-6">Step 1 of 2</p>
             <div className="flex flex-col gap-4">
               <button disabled={!plan.activityEnabled.tack}
-                className={`btn-primary  text-xl py-5 ${!plan.activityEnabled.tack ? disabledCls : ''}`}
+                className={`btn-secondary text-xl py-5 ${!plan.activityEnabled.tack ? disabledCls : ''}`}
                 onClick={() => pickActivity('tack')}>Tack</button>
               <button disabled={!plan.activityEnabled.weld}
                 className={`btn-secondary text-xl py-5 ${!plan.activityEnabled.weld ? disabledCls : ''}`}
                 onClick={() => pickActivity('weld')}>Weld</button>
               <button disabled={!plan.activityEnabled.tack_weld}
-                className={`btn-ghost    text-xl py-5 ${!plan.activityEnabled.tack_weld ? disabledCls : ''}`}
+                className={`btn-secondary text-xl py-5 ${!plan.activityEnabled.tack_weld ? disabledCls : ''}`}
                 onClick={() => pickActivity('tack_weld')}>Tack &amp; Weld</button>
               <button className="btn-ghost mt-1" onClick={onCancel}>Cancel</button>
             </div>
@@ -152,13 +152,13 @@ function JobActionModal({ onConfirm, onCancel, progress }) {
               return (
                 <div className="flex flex-col gap-4">
                   <button disabled={!workOk.parts}
-                    className={`btn-primary  text-xl py-5 ${!workOk.parts ? disabledCls : ''}`}
+                    className={`btn-secondary text-xl py-5 ${!workOk.parts ? disabledCls : ''}`}
                     onClick={() => pickWorkType('parts')}>Parts</button>
                   <button disabled={!workOk.frames}
                     className={`btn-secondary text-xl py-5 ${!workOk.frames ? disabledCls : ''}`}
                     onClick={() => pickWorkType('frames')}>Frames</button>
                   <button disabled={!workOk.parts_frames}
-                    className={`btn-ghost    text-xl py-5 ${!workOk.parts_frames ? disabledCls : ''}`}
+                    className={`btn-secondary text-xl py-5 ${!workOk.parts_frames ? disabledCls : ''}`}
                     onClick={() => pickWorkType('parts_frames')}>Parts &amp; Frames</button>
                   <button className="btn-ghost mt-1" onClick={() => setStep(1)}>← Back</button>
                 </div>
