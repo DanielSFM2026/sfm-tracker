@@ -3,7 +3,7 @@ import {
   fetchDepartmentEmployees, fetchAssemblyLines,
   findOrCreateJob, managerStartWorkerOnJob, managerStartAssemblyJobFull,
 } from '../lib/db'
-import { fetchDeptActiveEmployees } from '../lib/plan'
+import { fetchDeptActiveEmployees, fetchWeldCellStatus, weldPickerPlan, jobKey, WELD_CELL_LABEL } from '../lib/plan'
 
 function nowLocal() {
   const d = new Date(); d.setSeconds(0, 0)
@@ -37,8 +37,11 @@ export default function AssignWorkerModal({ department, job, onClose, onAssigned
   const [startTime, setStartTime] = useState(nowLocal)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [usedSingle, setUsedSingle] = useState(false)     // came via the one-cell shortcut, for Back routing
+  const [remainingCells, setRemainingCells] = useState(null)   // null while loading = permissive default
   const isWeld = department === 'weld'
   const ACTIVITY_LABEL = { tack: 'Tack', weld: 'Weld', tack_weld: 'Tack & Weld' }
+  const weldPlan = weldPickerPlan(remainingCells)
 
   useEffect(() => {
     let alive = true
@@ -46,9 +49,14 @@ export default function AssignWorkerModal({ department, job, onClose, onAssigned
       fetchDepartmentEmployees(department),
       fetchDeptActiveEmployees(department).catch(() => new Map()),
       isAssembly ? fetchAssemblyLines() : Promise.resolve([]),
-    ]).then(([emps, active, ls]) => {
+      isWeld ? fetchWeldCellStatus().catch(() => new Map()) : Promise.resolve(null),
+    ]).then(([emps, active, ls, weldStatus]) => {
       if (!alive) return
       setEmployees(emps); setActiveMap(active); setLines(ls)
+      if (weldStatus) {
+        const cellsObj = weldStatus.get(jobKey(job.po_number, job.part_number))
+        setRemainingCells(cellsObj ? Object.keys(cellsObj).filter(c => cellsObj[c].state !== 'done') : null)
+      }
     }).catch(err => { console.error(err); if (alive) setError('Could not load employees.') })
     return () => { alive = false }
   }, [department])
@@ -129,7 +137,12 @@ export default function AssignWorkerModal({ department, job, onClose, onAssigned
                   const on = selectedIds.has(e.employee_id)
                   return (
                     <button key={e.employee_id}
-                      onClick={() => isAssembly ? toggleMember(e.employee_id) : (setTarget(e), setStep(isWeld ? 'activity' : 'time'))}
+                      onClick={() => {
+                        if (isAssembly) { toggleMember(e.employee_id); return }
+                        setTarget(e)
+                        if (isWeld && weldPlan.single) { setUsedSingle(true); setStep('single') }
+                        else { setUsedSingle(false); setStep(isWeld ? 'activity' : 'time') }
+                      }}
                       className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border text-sm text-left transition-colors ${
                         isAssembly && on
                           ? 'bg-sky-900/40 border-sky-600 text-sky-200'
@@ -163,7 +176,30 @@ export default function AssignWorkerModal({ department, job, onClose, onAssigned
           </>
         )}
 
-        {/* Weld only — same two questions the worker's own clock-on screen asks */}
+        {/* Only one cell left on this job — skip the wizard, one-tap confirm */}
+        {step === 'single' && weldPlan.single && (
+          <>
+            <p className="text-stone-300 text-sm mb-1">
+              <strong className="text-stone-100">{WELD_CELL_LABEL[weldPlan.single]}</strong> is all that's left
+            </p>
+            <p className="text-stone-500 text-xs mb-4">Start {target?.full_name} on this?</p>
+            <button className="w-full py-4 rounded-xl bg-emerald-700/30 border border-emerald-600 text-emerald-300 text-lg font-semibold mb-2"
+              onClick={() => {
+                const [a, w] = weldPlan.single.split('_')
+                setActivityType(a); setWorkType(w); setStep('time')
+              }}>
+              Start
+            </button>
+            <button className="w-full text-sm text-stone-500 underline mb-1"
+              onClick={() => { setUsedSingle(false); setStep('activity') }}>
+              Choose something else
+            </button>
+            <button className="w-full text-sm text-stone-500 underline" onClick={() => setStep('pick')}>Back</button>
+          </>
+        )}
+
+        {/* Weld only — same two questions the worker's own clock-on screen asks.
+            Already-completed activities/work-types are greyed out. */}
         {step === 'activity' && (
           <>
             <p className="text-stone-300 text-sm mb-1">
@@ -171,34 +207,43 @@ export default function AssignWorkerModal({ department, job, onClose, onAssigned
             </p>
             <p className="text-stone-500 text-xs mb-4">Step 1 of 2</p>
             <div className="flex flex-col gap-2 mb-2">
-              <button className="py-4 rounded-xl bg-amber-500/20 border border-amber-600 text-amber-300 text-lg font-semibold"
+              <button disabled={!weldPlan.activityEnabled.tack}
+                className={`py-4 rounded-xl bg-amber-500/20 border border-amber-600 text-amber-300 text-lg font-semibold ${!weldPlan.activityEnabled.tack ? 'opacity-30 cursor-not-allowed' : ''}`}
                 onClick={() => { setActivityType('tack'); setStep('work') }}>Tack</button>
-              <button className="py-4 rounded-xl bg-stone-700 border border-stone-600 text-stone-200 text-lg font-semibold"
+              <button disabled={!weldPlan.activityEnabled.weld}
+                className={`py-4 rounded-xl bg-stone-700 border border-stone-600 text-stone-200 text-lg font-semibold ${!weldPlan.activityEnabled.weld ? 'opacity-30 cursor-not-allowed' : ''}`}
                 onClick={() => { setActivityType('weld'); setStep('work') }}>Weld</button>
-              <button className="py-4 rounded-xl border border-stone-600 text-stone-300 text-lg"
+              <button disabled={!weldPlan.activityEnabled.tack_weld}
+                className={`py-4 rounded-xl border border-stone-600 text-stone-300 text-lg ${!weldPlan.activityEnabled.tack_weld ? 'opacity-30 cursor-not-allowed' : ''}`}
                 onClick={() => { setActivityType('tack_weld'); setStep('work') }}>Tack &amp; Weld</button>
             </div>
             <button className="w-full text-sm text-stone-500 underline mt-1" onClick={() => setStep('pick')}>Back</button>
           </>
         )}
 
-        {step === 'work' && (
-          <>
-            <p className="text-stone-300 text-sm mb-1">Working on?</p>
-            <p className="text-stone-500 text-xs mb-4">
-              Step 2 of 2 · <span className="text-amber-400">{ACTIVITY_LABEL[activityType]}</span>
-            </p>
-            <div className="flex flex-col gap-2 mb-2">
-              <button className="py-4 rounded-xl bg-amber-500/20 border border-amber-600 text-amber-300 text-lg font-semibold"
-                onClick={() => { setWorkType('parts'); setStep('time') }}>Parts</button>
-              <button className="py-4 rounded-xl bg-stone-700 border border-stone-600 text-stone-200 text-lg font-semibold"
-                onClick={() => { setWorkType('frames'); setStep('time') }}>Frames</button>
-              <button className="py-4 rounded-xl border border-stone-600 text-stone-300 text-lg"
-                onClick={() => { setWorkType('parts_frames'); setStep('time') }}>Parts &amp; Frames</button>
-            </div>
-            <button className="w-full text-sm text-stone-500 underline mt-1" onClick={() => setStep('activity')}>Back</button>
-          </>
-        )}
+        {step === 'work' && (() => {
+          const workOk = weldPlan.workEnabledFor(activityType)
+          return (
+            <>
+              <p className="text-stone-300 text-sm mb-1">Working on?</p>
+              <p className="text-stone-500 text-xs mb-4">
+                Step 2 of 2 · <span className="text-amber-400">{ACTIVITY_LABEL[activityType]}</span>
+              </p>
+              <div className="flex flex-col gap-2 mb-2">
+                <button disabled={!workOk.parts}
+                  className={`py-4 rounded-xl bg-amber-500/20 border border-amber-600 text-amber-300 text-lg font-semibold ${!workOk.parts ? 'opacity-30 cursor-not-allowed' : ''}`}
+                  onClick={() => { setWorkType('parts'); setStep('time') }}>Parts</button>
+                <button disabled={!workOk.frames}
+                  className={`py-4 rounded-xl bg-stone-700 border border-stone-600 text-stone-200 text-lg font-semibold ${!workOk.frames ? 'opacity-30 cursor-not-allowed' : ''}`}
+                  onClick={() => { setWorkType('frames'); setStep('time') }}>Frames</button>
+                <button disabled={!workOk.parts_frames}
+                  className={`py-4 rounded-xl border border-stone-600 text-stone-300 text-lg ${!workOk.parts_frames ? 'opacity-30 cursor-not-allowed' : ''}`}
+                  onClick={() => { setWorkType('parts_frames'); setStep('time') }}>Parts &amp; Frames</button>
+              </div>
+              <button className="w-full text-sm text-stone-500 underline mt-1" onClick={() => setStep('activity')}>Back</button>
+            </>
+          )
+        })()}
 
         {/* Final step: confirm start time */}
         {step === 'time' && (
@@ -218,7 +263,7 @@ export default function AssignWorkerModal({ department, job, onClose, onAssigned
               {busy ? 'Starting…' : 'Confirm & Start'}
             </button>
             <button className="w-full text-sm text-stone-500 underline"
-              onClick={() => setStep(isAssembly ? 'team' : isWeld ? 'work' : 'pick')}>
+              onClick={() => setStep(isAssembly ? 'team' : isWeld ? (usedSingle ? 'single' : 'work') : 'pick')}>
               Back
             </button>
           </>

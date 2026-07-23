@@ -199,6 +199,34 @@ export const WELD_CELL_LABEL = { tack_parts: 'Tack · Parts', tack_frames: 'Tack
 const expandActivity = a => a === 'tack_weld' ? ['tack', 'weld'] : a ? [a] : []
 const expandWork     = w => w === 'parts_frames' ? ['parts', 'frames'] : w ? [w] : []
 
+// Given which cells are still left on a weld job, decide how the "what are
+// you doing?" picker should behave — shared by the worker's own clock-on
+// modal and the manager's assign-from-plan modal so both pickers agree:
+//  - single: if exactly one cell remains, its key (e.g. "weld_parts") — the
+//    picker can skip straight to a one-tap confirm instead of the 2-step
+//    wizard.
+//  - activityEnabled / workEnabledFor: which wizard buttons make sense to
+//    offer, so a fully-completed activity (e.g. Tack done on both Parts and
+//    Frames) isn't offered as if there were still something to do there.
+export function weldPickerPlan(remainingCells) {
+  const remaining = new Set(remainingCells ?? WELD_CELLS)
+  const has = c => remaining.has(c)
+  const anyTack = has('tack_parts') || has('tack_frames')
+  const anyWeld = has('weld_parts') || has('weld_frames')
+  return {
+    single: remaining.size === 1 ? [...remaining][0] : null,
+    activityEnabled: { tack: anyTack, weld: anyWeld, tack_weld: anyTack && anyWeld },
+    workEnabledFor(activityType) {
+      const cells = activityType === 'tack' ? ['tack_parts', 'tack_frames']
+                  : activityType === 'weld' ? ['weld_parts', 'weld_frames']
+                  : WELD_CELLS
+      const anyParts  = cells.some(c => c.endsWith('_parts')  && has(c))
+      const anyFrames = cells.some(c => c.endsWith('_frames') && has(c))
+      return { parts: anyParts, frames: anyFrames, parts_frames: anyParts && anyFrames }
+    },
+  }
+}
+
 // jobKey(po, part) -> { tack_parts: {state, name}, ... } for all 4 WELD_CELLS.
 // state is 'pending' (nobody's touched it), 'active' (someone's on it right
 // now), or 'done' (completed) — each cell always present so the UI can show

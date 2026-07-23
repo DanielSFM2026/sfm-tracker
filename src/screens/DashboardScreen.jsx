@@ -15,7 +15,7 @@ import JobCard from '../components/JobCard'
 import AlertModal from '../components/AlertModal'
 import PauseReasonModal from '../components/PauseReasonModal'
 import WeeklyPlanPanel from '../components/WeeklyPlanPanel'
-import { jobKey } from '../lib/plan'
+import { jobKey, weldPickerPlan } from '../lib/plan'
 
 const INACTIVITY_TIMEOUT_MS = 75_000
 
@@ -85,6 +85,8 @@ function ManualScanModal({ onSubmit, onCancel }) {
 
 // ── Two-step action modal (Activity → Work type) ─────────────────────────────
 function JobActionModal({ onConfirm, onCancel, progress }) {
+  const plan = weldPickerPlan(progress?.remaining)
+  const [skipSingle, setSkipSingle] = useState(false)   // "choose something else" override
   const [step, setStep]             = useState(1)
   const [activityType, setActivity] = useState(null)
 
@@ -92,6 +94,30 @@ function JobActionModal({ onConfirm, onCancel, progress }) {
   function pickWorkType(workType) { onConfirm({ activityType, workType }) }
 
   const activityLabel = { tack: 'Tack', weld: 'Weld', tack_weld: 'Tack & Weld' }
+  const disabledCls = 'opacity-30 cursor-not-allowed'
+
+  // Only one cell left on this machine — skip the two-step wizard entirely.
+  if (plan.single && !skipSingle) {
+    const [a, w] = plan.single.split('_')
+    return (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-6">
+        <div className="bg-stone-800 border border-stone-600 rounded-2xl p-8 w-full max-w-sm">
+          <MachineProgress progress={progress} />
+          <h2 className="text-2xl font-bold text-stone-100 mb-2 text-center">
+            {activityLabel[a] ?? a} · {w === 'parts' ? 'Parts' : 'Frames'} is all that's left
+          </h2>
+          <p className="text-stone-400 text-center text-sm mb-6">Start on this?</p>
+          <div className="flex flex-col gap-4">
+            <button className="btn-primary text-xl py-5" onClick={() => onConfirm({ activityType: a, workType: w })}>
+              Start
+            </button>
+            <button className="btn-ghost" onClick={() => setSkipSingle(true)}>Choose something else</button>
+            <button className="btn-ghost mt-1" onClick={onCancel}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-6">
@@ -102,9 +128,15 @@ function JobActionModal({ onConfirm, onCancel, progress }) {
             <h2 className="text-2xl font-bold text-stone-100 mb-1 text-center">What are you doing?</h2>
             <p className="text-stone-400 text-center text-sm mb-6">Step 1 of 2</p>
             <div className="flex flex-col gap-4">
-              <button className="btn-primary  text-xl py-5" onClick={() => pickActivity('tack')}>Tack</button>
-              <button className="btn-secondary text-xl py-5" onClick={() => pickActivity('weld')}>Weld</button>
-              <button className="btn-ghost    text-xl py-5" onClick={() => pickActivity('tack_weld')}>Tack &amp; Weld</button>
+              <button disabled={!plan.activityEnabled.tack}
+                className={`btn-primary  text-xl py-5 ${!plan.activityEnabled.tack ? disabledCls : ''}`}
+                onClick={() => pickActivity('tack')}>Tack</button>
+              <button disabled={!plan.activityEnabled.weld}
+                className={`btn-secondary text-xl py-5 ${!plan.activityEnabled.weld ? disabledCls : ''}`}
+                onClick={() => pickActivity('weld')}>Weld</button>
+              <button disabled={!plan.activityEnabled.tack_weld}
+                className={`btn-ghost    text-xl py-5 ${!plan.activityEnabled.tack_weld ? disabledCls : ''}`}
+                onClick={() => pickActivity('tack_weld')}>Tack &amp; Weld</button>
               <button className="btn-ghost mt-1" onClick={onCancel}>Cancel</button>
             </div>
           </>
@@ -115,12 +147,23 @@ function JobActionModal({ onConfirm, onCancel, progress }) {
               Step 2 of 2 &nbsp;·&nbsp;
               <span className="text-amber-400">{activityLabel[activityType]}</span>
             </p>
-            <div className="flex flex-col gap-4">
-              <button className="btn-primary  text-xl py-5" onClick={() => pickWorkType('parts')}>Parts</button>
-              <button className="btn-secondary text-xl py-5" onClick={() => pickWorkType('frames')}>Frames</button>
-              <button className="btn-ghost    text-xl py-5" onClick={() => pickWorkType('parts_frames')}>Parts &amp; Frames</button>
-              <button className="btn-ghost mt-1" onClick={() => setStep(1)}>← Back</button>
-            </div>
+            {(() => {
+              const workOk = plan.workEnabledFor(activityType)
+              return (
+                <div className="flex flex-col gap-4">
+                  <button disabled={!workOk.parts}
+                    className={`btn-primary  text-xl py-5 ${!workOk.parts ? disabledCls : ''}`}
+                    onClick={() => pickWorkType('parts')}>Parts</button>
+                  <button disabled={!workOk.frames}
+                    className={`btn-secondary text-xl py-5 ${!workOk.frames ? disabledCls : ''}`}
+                    onClick={() => pickWorkType('frames')}>Frames</button>
+                  <button disabled={!workOk.parts_frames}
+                    className={`btn-ghost    text-xl py-5 ${!workOk.parts_frames ? disabledCls : ''}`}
+                    onClick={() => pickWorkType('parts_frames')}>Parts &amp; Frames</button>
+                  <button className="btn-ghost mt-1" onClick={() => setStep(1)}>← Back</button>
+                </div>
+              )
+            })()}
           </>
         )}
       </div>
