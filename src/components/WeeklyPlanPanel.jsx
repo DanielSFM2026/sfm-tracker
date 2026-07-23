@@ -226,7 +226,6 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
                       ))}
                       {pending.length > 0 && (
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-xs font-semibold text-stone-500 shrink-0">Not started</span>
                           {pending.map(c => (
                             <span key={c} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full border text-stone-500 bg-stone-800/60 border-stone-700">
                               {WELD_CELL_LABEL[c]}
