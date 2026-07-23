@@ -145,7 +145,7 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
         <Tile n={counts.wip}     label="In progress"   stripe={STATE.wip.tile} />
         <Tile n={counts.ready}   label={ui.ready}       stripe={STATE.ready.tile} />
         <Tile n={counts.waiting} label={ui.waitLabel}   stripe={STATE.waiting.tile} />
-        <Tile n={counts.done}    label={ui.done}        stripe={STATE.done.tile} />
+        <Tile n={counts.done}    total={counts.total} label={ui.done}        stripe={STATE.done.tile} />
       </div>
 
       {/* Column header */}
@@ -282,11 +282,13 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
   )
 }
 
-function Tile({ n, label, stripe }) {
+function Tile({ n, total, label, stripe }) {
   return (
     <div className="relative bg-stone-900 border border-stone-800 rounded-xl px-3 py-2.5 overflow-hidden">
       <span className={`absolute left-0 top-0 bottom-0 w-1 ${stripe}`} />
-      <p className="text-2xl sm:text-3xl font-extrabold tabular-nums leading-none">{n}</p>
+      <p className="text-2xl sm:text-3xl font-extrabold tabular-nums leading-none">
+        {n}{total != null && <span className="text-stone-500">/{total}</span>}
+      </p>
       <p className="text-[10px] uppercase tracking-wider text-stone-500 font-semibold mt-1 leading-tight truncate">{label}</p>
     </div>
   )
