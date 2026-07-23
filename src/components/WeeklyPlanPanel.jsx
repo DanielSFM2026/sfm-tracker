@@ -165,12 +165,11 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
         </div>
       </div>
 
-      {/* Summary tiles */}
-      <div className="shrink-0 px-3 py-2.5 grid grid-cols-3 sm:grid-cols-5 gap-2 border-b border-stone-800">
-        <Tile n={counts.total} label={searching ? 'Matches' : 'Jobs this week'} stripe="bg-stone-500" />
-        <Tile n={counts.wip}     label="In progress"   stripe={STATE.wip.tile} />
-        <Tile n={counts.ready}   label={ui.ready}       stripe={STATE.ready.tile} />
-        <Tile n={counts.waiting} label={ui.waitLabel}   stripe={STATE.waiting.tile} />
+      {/* Summary tiles — each shown as a fraction of the week's total jobs */}
+      <div className="shrink-0 px-3 py-2.5 grid grid-cols-2 sm:grid-cols-4 gap-2 border-b border-stone-800">
+        <Tile n={counts.wip}     total={counts.total} label="In progress"   stripe={STATE.wip.tile} />
+        <Tile n={counts.ready}   total={counts.total} label={ui.ready}       stripe={STATE.ready.tile} />
+        <Tile n={counts.waiting} total={counts.total} label={ui.waitLabel}   stripe={STATE.waiting.tile} />
         <Tile n={counts.done}    total={counts.total} label={ui.done}        stripe={STATE.done.tile} />
       </div>
 
