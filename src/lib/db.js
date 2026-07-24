@@ -119,15 +119,16 @@ export async function findOrCreateJob(poNumber, partNumber, department = 'weld')
 // Fully delete a job: events, issue reports, paint-batch links, then the row.
 // Everyone who had time on it gets their split multiplier re-stamped afterwards —
 // otherwise their remaining active jobs keep counting at the stale ÷N rate.
+// Deletes go through narrow Postgres functions (SECURITY DEFINER), not raw
+// table .delete() — the anon key the browser ships has no DELETE grant on
+// any table, so a leaked key can't be used to wipe data directly. Each
+// function does exactly the one thing the app needs, nothing broader.
 export async function deleteCreatedJob(jobId) {
   const { data: affected } = await supabase
     .from('job_events').select('employee_id').eq('job_id', jobId)
   const affectedIds = [...new Set((affected ?? []).map(r => r.employee_id))]
 
-  await supabase.from('job_alerts').delete().eq('job_id', jobId)
-  await supabase.from('paint_batch_jobs').delete().eq('job_id', jobId)
-  await supabase.from('job_events').delete().eq('job_id', jobId)
-  const { error } = await supabase.from('jobs').delete().eq('job_id', jobId)
+  const { error } = await supabase.rpc('app_delete_job', { p_job_id: jobId })
   if (error) throw error
 
   for (const empId of affectedIds) {
@@ -138,15 +139,8 @@ export async function deleteCreatedJob(jobId) {
 // Worker backs out of a job they scanned by mistake: removes only their own
 // events; the job row goes too if nobody else has ever touched it
 export async function cancelMyJob(jobId, employeeId) {
-  const { error } = await supabase
-    .from('job_events').delete()
-    .eq('job_id', jobId).eq('employee_id', employeeId)
+  const { error } = await supabase.rpc('app_cancel_my_job', { p_job_id: jobId, p_employee_id: employeeId })
   if (error) throw error
-  const { data } = await supabase
-    .from('job_events').select('event_id').eq('job_id', jobId).limit(1)
-  if (!data?.length) {
-    await supabase.from('jobs').delete().eq('job_id', jobId)
-  }
 }
 
 // Returns true if this employee has a COMPLETE event on the given job
@@ -1252,11 +1246,7 @@ export async function addJobToPaintBatch(batchId, poNumber, partNumber, workType
 }
 
 export async function removeJobFromPaintBatch(batchId, jobId) {
-  const { error } = await supabase
-    .from('paint_batch_jobs')
-    .delete()
-    .eq('batch_id', batchId)
-    .eq('job_id', jobId)
+  const { error } = await supabase.rpc('app_remove_job_from_paint_batch', { p_batch_id: batchId, p_job_id: jobId })
   if (error) throw error
 }
 
@@ -1427,10 +1417,7 @@ export async function updateEventTimestamp(eventId, newIsoTimestamp) {
 
 // Delete a single event (manager corrections — e.g. a double-scan)
 export async function deleteJobEvent(eventId) {
-  const { error } = await supabase
-    .from('job_events')
-    .delete()
-    .eq('event_id', eventId)
+  const { error } = await supabase.rpc('app_delete_job_event', { p_event_id: eventId })
   if (error) throw error
 }
 
