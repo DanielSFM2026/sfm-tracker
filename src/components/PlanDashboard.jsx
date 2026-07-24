@@ -8,16 +8,29 @@ const DEPT_ACCENT = {
   subs:    { text: 'text-emerald-400',bar: 'bg-emerald-500' },
 }
 
+const CURRENT_YEAR = new Date().getFullYear()
+
+// customer_req_date is stored as 'dd/mm/yy' — pull out just the year.
+function reqYear(dateStr) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{2})$/.exec(String(dateStr ?? '').trim())
+  return m ? 2000 + parseInt(m[3], 10) : null
+}
+
 // Week numbers in the plan have no year attached (1-52, repeating every
 // year), so a naive "plannedWeek < currentWeek" check misreads next year's
 // early weeks as wildly overdue (e.g. week 3 read as 27 weeks late in week
 // 30, when it's actually week 3 of NEXT year — still ~25 weeks away).
-// A gap of more than half a year is almost certainly a next-year date, not
-// a genuinely stale job, so treat it as upcoming rather than late.
-function weeksLate(plannedWeek, currentWeek) {
+// customer_req_date gives a real, dated answer when it's there (if it's
+// due in a later year, the planned week must be that later year's week —
+// found via a batch whose req date was 25/02/27, so week 5/6/7 was
+// actually 2027, not 2026). Only fall back to the coarse >26-week guess
+// when there's no date to check against.
+function weeksLate(plannedWeek, currentWeek, customerReqDate) {
   const diff = currentWeek - plannedWeek
   if (diff <= 0) return null       // this week or still in the future
-  if (diff > 26) return null       // "late" by raw numbers, but really next year
+  const ry = reqYear(customerReqDate)
+  if (ry != null && ry > CURRENT_YEAR) return null   // confirmed next-year job via the actual due date
+  if (diff > 26) return null       // no date evidence — fall back to the distance heuristic
   return diff
 }
 
@@ -55,7 +68,7 @@ export default function PlanDashboard() {
         if (pw === cw) {
           due++
         } else {
-          const wl = weeksLate(pw, cw)
+          const wl = weeksLate(pw, cw, row.customer_req_date)
           if (wl != null) late.push({ ...row, plannedWeek: pw, weeksLate: wl })
         }
       }
