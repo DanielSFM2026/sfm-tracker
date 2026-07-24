@@ -184,9 +184,9 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
           </div>
           {/* PO — the disambiguator between two of the same part; kept prominent */}
           <div className="flex items-center gap-1.5 mt-1">
-            <span className="text-[10px] uppercase tracking-widest text-stone-500 font-bold">PO</span>
+            <span className="text-xs uppercase tracking-widest text-stone-500 font-bold">PO</span>
             <span className="font-mono font-bold text-amber-300 text-base sm:text-lg leading-none">{job.po_number}</span>
-            {searching && <span className="text-[10px] text-stone-500 font-semibold">wk {job.planned_week}</span>}
+            {searching && <span className="text-sm text-stone-400 font-bold">wk {job.planned_week}</span>}
           </div>
           {job.description && <p className="text-sm text-stone-400 truncate mt-1">{job.description}</p>}
 
