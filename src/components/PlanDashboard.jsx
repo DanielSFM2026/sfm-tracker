@@ -8,6 +8,19 @@ const DEPT_ACCENT = {
   subs:    { text: 'text-emerald-400',bar: 'bg-emerald-500' },
 }
 
+// Week numbers in the plan have no year attached (1-52, repeating every
+// year), so a naive "plannedWeek < currentWeek" check misreads next year's
+// early weeks as wildly overdue (e.g. week 3 read as 27 weeks late in week
+// 30, when it's actually week 3 of NEXT year — still ~25 weeks away).
+// A gap of more than half a year is almost certainly a next-year date, not
+// a genuinely stale job, so treat it as upcoming rather than late.
+function weeksLate(plannedWeek, currentWeek) {
+  const diff = currentWeek - plannedWeek
+  if (diff <= 0) return null       // this week or still in the future
+  if (diff > 26) return null       // "late" by raw numbers, but really next year
+  return diff
+}
+
 // Manager plan dashboard: department load per week, overdue jobs, and what's
 // due / completed this week — all off the synced build_plan.
 // A job is "in a department's plan" when its planned-week cell is a real week
@@ -39,8 +52,12 @@ export default function PlanDashboard() {
         if (pw == null || cwk != null) continue   // not planned by week, or already done
         open++
         openByWeek.set(pw, (openByWeek.get(pw) ?? 0) + 1)
-        if (pw < cw) late.push({ ...row, plannedWeek: pw, weeksLate: cw - pw })
-        else if (pw === cw) due++
+        if (pw === cw) {
+          due++
+        } else {
+          const wl = weeksLate(pw, cw)
+          if (wl != null) late.push({ ...row, plannedWeek: pw, weeksLate: wl })
+        }
       }
       late.sort((a, b) => a.plannedWeek - b.plannedWeek)
       return { ...d, openByWeek, late, open, due, completedThisWeek }
