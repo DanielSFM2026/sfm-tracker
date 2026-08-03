@@ -6,7 +6,7 @@ import {
   fetchDepartmentEmployees, managerStartWorkerOnJob, managerStartAssemblyJobFull,
   findOrCreateJob, addTeamMemberToJob, employeeHasCompletedJob,
   loadJobHistory, loadJobEvents, updateEventTimestamp, deleteJobEvent, addJobEvent,
-  deleteCreatedJob,
+  deleteCreatedJob, fetchJobAlerts,
 } from '../lib/db'
 import { calcElapsed, formatDuration, isJobActive, parseJobBarcode } from '../lib/timeCalc'
 import { holdReasonsFor, HOLD_REASON_LABEL } from '../lib/constants'
@@ -1392,6 +1392,169 @@ function HistoryView({ breakRules }) {
   )
 }
 
+// ── Alerts view (quality engineer) ─────────────────────────────────────────────
+// Flagged issues raised from the shop floor, filterable by date range and
+// exportable as a CSV that opens directly in Excel.
+function csvEscape(v) {
+  const s = String(v ?? '')
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+function downloadAlertsCsv(rows) {
+  const headers = ['Date', 'Time', 'Department', 'Line', 'Employee', 'PO Number', 'Part Number', 'Message']
+  const lines = [headers.join(',')]
+  for (const r of rows) {
+    const d = new Date(r.created_at)
+    lines.push([
+      d.toLocaleDateString('en-GB'),
+      d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+      r.department,
+      r.line_name ?? '',
+      r.employee_name,
+      r.po_number,
+      r.part_number,
+      r.message,
+    ].map(csvEscape).join(','))
+  }
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `job-alerts_${new Date().toISOString().slice(0, 10)}.csv`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+function AlertsView() {
+  const today = new Date()
+  const fmt = d => d.toISOString().slice(0, 10)
+
+  const PRESETS = {
+    week:  () => { const d = new Date(today); const day = (d.getDay() + 6) % 7; d.setDate(d.getDate() - day); return d },
+    month: () => new Date(today.getFullYear(), today.getMonth(), 1),
+  }
+
+  const [fromDate, setFromDate] = useState(fmt(PRESETS.week()))
+  const [toDate, setToDate]     = useState(fmt(today))
+  const [alerts, setAlerts]     = useState(null)
+  const [lineNames, setLineNames] = useState({})
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState('')
+
+  useEffect(() => {
+    fetchAssemblyLines()
+      .then(ls => setLineNames(Object.fromEntries(ls.map(l => [l.line_id, l.line_name]))))
+      .catch(console.error)
+  }, [])
+
+  async function search() {
+    setLoading(true); setError('')
+    try {
+      const fromISO = fromDate ? new Date(fromDate + 'T00:00:00').toISOString() : undefined
+      const toISO   = toDate   ? new Date(toDate   + 'T23:59:59').toISOString() : undefined
+      const data = await fetchJobAlerts({ fromDate: fromISO, toDate: toISO })
+      setAlerts(data)
+    } catch { setError('Failed to load alerts — check connection.') }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { search() }, [])
+
+  function applyPreset(key) {
+    setFromDate(fmt(PRESETS[key]()))
+    setToDate(fmt(today))
+  }
+
+  const DEPT_COLOUR = { weld: 'text-blue-400', kitting: 'text-orange-400', paint: 'text-red-400', assembly: 'text-emerald-400' }
+
+  const lineNameOf = a => a.line_id != null ? (lineNames[a.line_id] ?? `Line ${a.line_id}`) : null
+  const alertsForExport = () => (alerts ?? []).map(a => ({ ...a, line_name: lineNameOf(a) }))
+
+  return (
+    <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4">
+      <div className="bg-stone-900 rounded-2xl border border-stone-700 p-4 space-y-3">
+        <p className="text-xs text-stone-500 uppercase tracking-widest">Filter</p>
+        <div className="flex gap-2">
+          <button onClick={() => applyPreset('week')}
+            className="flex-1 py-2 rounded-xl bg-stone-800 border border-stone-600 text-stone-300 text-xs font-semibold hover:bg-stone-700">
+            This Week
+          </button>
+          <button onClick={() => applyPreset('month')}
+            className="flex-1 py-2 rounded-xl bg-stone-800 border border-stone-600 text-stone-300 text-xs font-semibold hover:bg-stone-700">
+            This Month
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-stone-600 block mb-1">From</label>
+            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+              className="w-full bg-stone-800 border border-stone-600 focus:border-amber-500 rounded-xl px-3 py-2.5 text-stone-100 text-sm outline-none" />
+          </div>
+          <div>
+            <label className="text-xs text-stone-600 block mb-1">To</label>
+            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+              className="w-full bg-stone-800 border border-stone-600 focus:border-amber-500 rounded-xl px-3 py-2.5 text-stone-100 text-sm outline-none" />
+          </div>
+        </div>
+        <button onClick={search} disabled={loading}
+          className="w-full bg-amber-600/30 border border-amber-600 text-amber-300 py-3 rounded-xl text-sm font-semibold hover:bg-amber-600/50 transition-colors disabled:opacity-40">
+          {loading ? 'Searching…' : 'Search'}
+        </button>
+      </div>
+
+      {error && <p className="text-red-400 text-sm bg-red-900/20 rounded-xl px-4 py-3">{error}</p>}
+
+      {alerts !== null && (
+        <>
+          <div className="flex items-center justify-between px-1">
+            <p className="text-xs text-stone-600">{alerts.length} alert{alerts.length !== 1 ? 's' : ''} in range</p>
+            <button
+              disabled={alerts.length === 0}
+              onClick={() => downloadAlertsCsv(alertsForExport())}
+              className="bg-emerald-800/40 border border-emerald-700 text-emerald-300 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-40">
+              ⬇ Export to Excel
+            </button>
+          </div>
+
+          {alerts.length === 0 && (
+            <div className="text-center py-16 text-stone-600">
+              <p className="text-4xl mb-4">🚩</p>
+              <p>No alerts in this range</p>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {alerts.map(a => {
+              const d = new Date(a.created_at)
+              return (
+                <div key={a.alert_id} className="bg-stone-900 border border-stone-700 rounded-2xl px-4 py-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-xs font-bold uppercase ${DEPT_COLOUR[a.department] ?? 'text-stone-400'}`}>
+                          {a.department}{lineNameOf(a) ? ` · ${lineNameOf(a)}` : ''}
+                        </span>
+                      </div>
+                      <p className="text-stone-100 font-semibold truncate">PO {a.po_number} &nbsp;·&nbsp; {a.part_number}</p>
+                      <p className="text-stone-500 text-xs mt-0.5">{a.employee_name}</p>
+                      <p className="text-stone-300 text-sm mt-2">{a.message}</p>
+                    </div>
+                    <p className="text-stone-600 text-xs shrink-0 text-right">
+                      {d.toLocaleDateString('en-GB')}<br />{d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Main report screen ────────────────────────────────────────────────────────
 export default function ManagerReport({ onBack }) {
   const [tab, setTab]               = useState('live')   // 'live' | 'history'
@@ -1488,7 +1651,7 @@ export default function ManagerReport({ onBack }) {
 
       {/* Tab bar */}
       <div className="bg-stone-900 border-b border-stone-700 flex shrink-0">
-        {[['live', 'Live Overview'], ['queue', 'Weekly Plan'], ['plan', 'Plan'], ['history', 'History']].map(([key, label]) => (
+        {[['live', 'Live Overview'], ['queue', 'Weekly Plan'], ['plan', 'Plan'], ['history', 'History'], ['alerts', 'Alerts']].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)}
             className={`flex-1 py-3 text-sm font-semibold transition-colors flex items-center justify-center gap-1.5 ${
               tab === key
@@ -1513,6 +1676,9 @@ export default function ManagerReport({ onBack }) {
 
       {/* History tab */}
       {tab === 'history' && <HistoryView breakRules={breakRules} />}
+
+      {/* Alerts tab (quality engineer) */}
+      {tab === 'alerts' && <AlertsView />}
 
       {/* Live tab content */}
       {tab === 'live' && <div className="flex-1 overflow-y-auto px-4 py-5 space-y-5">

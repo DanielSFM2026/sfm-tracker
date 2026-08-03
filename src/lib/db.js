@@ -15,6 +15,36 @@ export async function sendJobAlert({ jobId, employeeId, lineId, poNumber, partNu
   if (error) throw error
 }
 
+// All flagged alerts in a date range, with employee/line/department context —
+// used by the quality engineer's Alerts report (view + Excel/CSV export).
+export async function fetchJobAlerts({ fromDate, toDate } = {}) {
+  let q = supabase
+    .from('job_alerts')
+    .select(`
+      alert_id, po_number, part_number, message, created_at, line_id,
+      employees ( full_name, department ),
+      jobs ( department )
+    `)
+    .order('created_at', { ascending: false })
+
+  if (fromDate) q = q.gte('created_at', fromDate)
+  if (toDate)   q = q.lte('created_at', toDate)
+
+  const { data, error } = await q
+  if (error) throw error
+
+  return (data ?? []).map(a => ({
+    alert_id:    a.alert_id,
+    created_at:  a.created_at,
+    po_number:   a.po_number,
+    part_number: a.part_number,
+    message:     a.message,
+    employee_name: a.employees?.full_name ?? '—',
+    department:    a.jobs?.department ?? a.employees?.department ?? '—',
+    line_id:       a.line_id,
+  }))
+}
+
 // ── Break rules ─────────────────────────────────────────────────────────────
 
 export async function fetchBreakRules() {
