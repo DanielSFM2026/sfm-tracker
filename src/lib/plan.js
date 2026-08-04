@@ -16,7 +16,7 @@ export const PLAN_WEEK_COL = {
 }
 
 const PLAN_FIELDS =
-  'seq_no, po_number, part_number, model, description, customer, quantity, ' +
+  'seq_no, po_number, part_number, model, description, customer, quantity, status, ' +
   'customer_req_date, original_date, kit_week, fab_week, paint_week, subs_week, ' +
   'cut_week, fold_week, kitting_week, weld_week, painting_week, subassembly_week'
 

@@ -148,6 +148,7 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
   function renderJobRow(job) {
     const s   = STATE[job._state]
     const onList = activeKeys?.has(jobKey(job.po_number, job.part_number))
+    const onHold = String(job.status ?? '').trim().toUpperCase() === 'HOLD'
     const isOutsourcedJob = job._state === 'outsourced'
     const canStart = job._state !== 'done' && !isOutsourcedJob
     const key      = jobKey(job.po_number, job.part_number)
@@ -187,12 +188,15 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
 
     return (
       <div key={job.seq_no ?? `${job.po_number}-${job.part_number}`}
-        className={`flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 rounded-xl bg-stone-900 border border-stone-800 border-l-4 ${s.row} p-3`}>
+        className={`flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 rounded-xl bg-stone-900 border p-3 border-l-4 ${
+          onHold ? 'border-red-800 border-l-red-500' : `border-stone-800 ${s.row}`
+        }`}>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-mono text-lg font-bold">{job.part_number}</span>
             {job.model && <span className="text-xs font-semibold text-amber-300 bg-amber-500/10 border border-amber-700/50 rounded px-1.5 py-0.5">{job.model}</span>}
             <span className={`text-[11px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 ${s.pill}`}>● {stateLabel[job._state]}</span>
+            {onHold && <span className="text-[11px] font-bold uppercase tracking-wide text-red-300 bg-red-500/20 border border-red-700/60 rounded-full px-2 py-0.5">⏸ Hold</span>}
             {onList && <span className="text-[11px] font-semibold text-sky-300 bg-sky-500/15 border border-sky-700/50 rounded-full px-2 py-0.5">On your list</span>}
           </div>
           {/* PO — the disambiguator between two of the same part; kept prominent */}

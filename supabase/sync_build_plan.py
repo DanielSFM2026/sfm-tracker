@@ -25,7 +25,7 @@ BATCH = 300
 COLS = {
     'seq_no': 1, 'po_number': 32, 'part_number': 33, 'wo_number': 31, 'sage_wo': 44,
     'model': 68, 'description': 38, 'customer': 41, 'finish': 39, 'quantity': 40,
-    'nest_code': 5, 'fab_cat': 8, 'sub_line': 12, 'code': 30,
+    'status': 3, 'nest_code': 5, 'fab_cat': 8, 'sub_line': 12, 'code': 30,
     'kit_week': 6, 'fab_week': 7, 'paint_week': 9, 'paint_out_week': 10, 'subs_week': 11,
     'cut_week': 13, 'fold_week': 15, 'kitting_week': 17, 'kitting_so': 18,
     'weld_week': 20, 'painting_week': 22, 'subassembly_week': 24,
