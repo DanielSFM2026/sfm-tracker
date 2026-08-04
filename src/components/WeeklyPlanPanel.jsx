@@ -18,15 +18,17 @@ const DEPT_UI = {
 
 // state → styling
 const STATE = {
-  wip:     { stripe: 'bg-amber-500',   pill: 'text-amber-400 bg-amber-500/15',   tile: 'bg-amber-500',   row: 'border-l-amber-500' },
-  ready:   { stripe: 'bg-blue-500',    pill: 'text-blue-400 bg-blue-500/15',     tile: 'bg-blue-500',    row: 'border-l-blue-500' },
-  waiting: { stripe: 'bg-stone-500',   pill: 'text-stone-400 bg-stone-600/40',   tile: 'bg-stone-500',   row: 'border-l-stone-600' },
-  done:    { stripe: 'bg-emerald-500', pill: 'text-emerald-400 bg-emerald-500/15', tile: 'bg-emerald-500', row: 'border-l-emerald-600' },
+  wip:        { stripe: 'bg-amber-500',   pill: 'text-amber-400 bg-amber-500/15',   tile: 'bg-amber-500',   row: 'border-l-amber-500' },
+  ready:      { stripe: 'bg-blue-500',    pill: 'text-blue-400 bg-blue-500/15',     tile: 'bg-blue-500',    row: 'border-l-blue-500' },
+  waiting:    { stripe: 'bg-stone-500',   pill: 'text-stone-400 bg-stone-600/40',   tile: 'bg-stone-500',   row: 'border-l-stone-600' },
+  done:       { stripe: 'bg-emerald-500', pill: 'text-emerald-400 bg-emerald-500/15', tile: 'bg-emerald-500', row: 'border-l-emerald-600' },
+  outsourced: { stripe: 'bg-stone-700',   pill: 'text-stone-500 bg-stone-800',      tile: 'bg-stone-700',   row: 'border-l-stone-800' },
 }
 
-// List order: in-progress first, then ready, then waiting-on-upstream, with
-// completed at the very bottom. Within a group, by customer then part number.
-const STATE_RANK = { wip: 0, ready: 1, waiting: 2, done: 3 }
+// List order: in-progress first, then ready, then waiting-on-upstream, then
+// completed, with outsourced (not our work at all) parked at the very
+// bottom. Within a group, by customer then part number.
+const STATE_RANK = { wip: 0, ready: 1, waiting: 2, done: 3, outsourced: 4 }
 
 // Default shape for a weld job that has no job_events yet — all 4 cells pending.
 const PENDING_CELLS = Object.fromEntries(WELD_CELLS.map(c => [c, { state: 'pending', name: null }]))
@@ -114,7 +116,6 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
     // selected — since the point is finding a job when you don't know its week.
     const source = searching ? [...plan.byWeek.values()].flat() : (week != null ? plan.byWeek.get(week) ?? [] : [])
     let list = source.map(j => ({ ...j, _state: stateOf(j) }))
-      .filter(j => j._state !== 'outsourced')
     if (searching) {
       list = list.filter(j =>
         String(j.part_number ?? '').toLowerCase().includes(q) ||
@@ -133,38 +134,46 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
     return list
   }, [plan, week, statuses, q, searching])
 
+  // Outsourced jobs aren't our work, so they don't count toward the tiles —
+  // total stays the count of jobs actually relevant to this department.
   const counts = useMemo(() => {
-    const c = { total: jobs.length, wip: 0, ready: 0, waiting: 0, done: 0 }
-    for (const j of jobs) c[j._state]++
+    const relevant = jobs.filter(j => j._state !== 'outsourced')
+    const c = { total: relevant.length, wip: 0, ready: 0, waiting: 0, done: 0 }
+    for (const j of relevant) c[j._state]++
     return c
   }, [jobs])
 
-  const stateLabel = { wip: 'In progress', ready: ui.ready, waiting: ui.waiting, done: ui.done }
+  const stateLabel = { wip: 'In progress', ready: ui.ready, waiting: ui.waiting, done: ui.done, outsourced: 'Outsourced' }
 
   function renderJobRow(job) {
     const s   = STATE[job._state]
     const onList = activeKeys?.has(jobKey(job.po_number, job.part_number))
-    const canStart = job._state !== 'done'
+    const isOutsourcedJob = job._state === 'outsourced'
+    const canStart = job._state !== 'done' && !isOutsourcedJob
     const key      = jobKey(job.po_number, job.part_number)
     const isWeld   = department === 'weld'
     const workers  = !isWeld && job._state === 'wip' ? (activeWork.get(key) ?? []) : []
     // A job with no events at all has no cellStatus entry yet — default
     // to all-pending so the 4 pills always show, even untouched.
-    const cells    = isWeld ? (cellStatus.get(key) ?? PENDING_CELLS) : null
+    const cells    = isWeld && !isOutsourcedJob ? (cellStatus.get(key) ?? PENDING_CELLS) : null
 
     // Rendered once, used both in the mobile bottom bar and the desktop
-    // action column — a job is either actionable (Assign/Start/Resume) or
-    // already done. No need to repeat the state pill a second time here;
-    // it's already shown up top next to the part number.
+    // action column — a job is either actionable (Assign/Start/Resume),
+    // done, or outsourced (parked at the bottom, nothing to click). No need
+    // to repeat the state pill a second time here; it's already shown up
+    // top next to the part number.
+    const doneOrOutsourcedEl = isOutsourcedJob ? (
+      <span className="px-3 py-1.5 rounded-lg text-xs font-semibold text-stone-500 bg-stone-800/60 border border-stone-700 shrink-0">⇢ Outsourced</span>
+    ) : (
+      <span className="px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-700/40 shrink-0">✓ {ui.done}</span>
+    )
     const actionEl = embedded ? (
       canStart ? (
         <button onClick={() => setAssignJob(job)}
           className="px-4 py-2 rounded-lg border border-stone-600 bg-stone-800 text-stone-300 text-xs font-semibold hover:bg-stone-700 shrink-0">
           + Assign
         </button>
-      ) : (
-        <span className="px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-700/40 shrink-0">✓ {ui.done}</span>
-      )
+      ) : doneOrOutsourcedEl
     ) : canStart ? (
       <button onClick={() => onPick(job.po_number, job.part_number)}
         className={`px-5 py-2.5 rounded-xl font-bold text-sm active:scale-95 transition-transform shrink-0 ${
@@ -174,9 +183,7 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
         }`}>
         {job._state === 'wip' && onList ? '▶ Resume' : '▶ Start'}
       </button>
-    ) : (
-      <span className="px-4 py-2 rounded-xl text-center font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-700/40 text-sm shrink-0">✓ {ui.done}</span>
-    )
+    ) : doneOrOutsourcedEl
 
     return (
       <div key={job.seq_no ?? `${job.po_number}-${job.part_number}`}
