@@ -175,7 +175,7 @@ export default function KittingDashboard({ employee, onLogout }) {
         event_timestamp: new Date().toISOString(),
       })
       await setJobStatus(job.job_id, 'in_progress')
-      setJobs(prev => [...prev, { ...job, startedAt: new Date().toISOString() }])
+      setJobs(prev => [{ ...job, startedAt: new Date().toISOString() }, ...prev])
     } catch (err) {
       console.error(err)
       setError('Failed to look up job — check connection.')

@@ -224,10 +224,18 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
       .sort((a, b) => new Date(b.event_timestamp) - new Date(a.event_timestamp))[0] ?? {}
   }
 
-  function appendEvent(jobId, ev) {
-    setJobs(prev =>
-      prev.map(j => j.job_id === jobId ? { ...j, events: [...j.events, ev] } : j)
-    )
+  // toFront: also move this job to the top of the list — used when starting
+  // or resuming, so whatever they just picked is immediately visible without
+  // scrolling. Left false for pause/edit, which shouldn't jump the list around.
+  function appendEvent(jobId, ev, { toFront = false } = {}) {
+    setJobs(prev => {
+      const updated = prev.map(j => j.job_id === jobId ? { ...j, events: [...j.events, ev] } : j)
+      if (!toFront) return updated
+      const idx = updated.findIndex(j => j.job_id === jobId)
+      if (idx <= 0) return updated
+      const [item] = updated.splice(idx, 1)
+      return [item, ...updated]
+    })
   }
 
   async function pauseActive() {
@@ -339,11 +347,11 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
         const newCount = activeCount + 1
         await updateSplitCounts(newCount)
         const ev = await resumeJob(employee.employee_id, jobId, tag.activity_type, tag.work_type, newCount)
-        appendEvent(jobId, ev)
+        appendEvent(jobId, ev, { toFront: true })
       } else {
         await pauseActive()
         const ev = await resumeJob(employee.employee_id, jobId, tag.activity_type, tag.work_type, 1)
-        appendEvent(jobId, ev)
+        appendEvent(jobId, ev, { toFront: true })
       }
     } catch (err) {
       console.error(err)
@@ -370,11 +378,11 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
           const newCount = activeCount + 1
           await updateSplitCounts(newCount)
           const events = await startNewJob(employee.employee_id, jobId, wasCreated, activityType, workType, newCount)
-          setJobs(prev => [...prev, { ...newJob, events }])
+          setJobs(prev => [{ ...newJob, events }, ...prev])
         } else {
           await pauseActive()
           const events = await startNewJob(employee.employee_id, jobId, wasCreated, activityType, workType, 1)
-          setJobs(prev => [...prev, { ...newJob, events }])
+          setJobs(prev => [{ ...newJob, events }, ...prev])
         }
 
       } else {
@@ -383,11 +391,11 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
           const newCount = activeCount + 1
           await updateSplitCounts(newCount)
           const ev = await resumeJob(employee.employee_id, jobId, activityType, workType, newCount)
-          appendEvent(jobId, ev)
+          appendEvent(jobId, ev, { toFront: true })
         } else {
           await pauseActive()
           const ev = await resumeJob(employee.employee_id, jobId, activityType, workType, 1)
-          appendEvent(jobId, ev)
+          appendEvent(jobId, ev, { toFront: true })
         }
       }
     } catch (err) {
