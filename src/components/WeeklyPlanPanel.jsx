@@ -40,7 +40,7 @@ function useClock() {
 // department, title — required.
 // operatorName, onPick, onClose — worker (full-screen) mode.
 // embedded — true for the manager view: no fixed overlay, no Close/clock, no
-//   Start/Open buttons (managers browse, they don't clock jobs in from here).
+//   Start/Resume buttons (managers browse, they don't clock jobs in from here).
 export default function WeeklyPlanPanel({ department, title, operatorName, activeKeys, onPick, onClose, embedded = false }) {
   const ui = DEPT_UI[department] ?? DEPT_UI.weld
   const [plan, setPlan]         = useState(null)
@@ -147,7 +147,7 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
     const cells    = isWeld ? (cellStatus.get(key) ?? PENDING_CELLS) : null
 
     // Rendered once, used both in the mobile bottom bar and the desktop
-    // action column — a job is either actionable (Assign/Start/Open) or
+    // action column — a job is either actionable (Assign/Start/Resume) or
     // already done. No need to repeat the state pill a second time here;
     // it's already shown up top next to the part number.
     const actionEl = embedded ? (
@@ -166,7 +166,7 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
             ? 'bg-amber-500 hover:bg-amber-400 text-stone-950'
             : 'bg-blue-500 hover:bg-blue-400 text-white'
         }`}>
-        {job._state === 'wip' ? 'Open' : '▶ Start'}
+        {job._state === 'wip' ? '▶ Resume' : '▶ Start'}
       </button>
     ) : (
       <span className="px-4 py-2 rounded-xl text-center font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-700/40 text-sm shrink-0">✓ {ui.done}</span>
@@ -331,7 +331,7 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
       </div>
 
       {/* Summary tiles — each shown as a fraction of the week's total jobs */}
-      <div className="shrink-0 px-3 py-2.5 grid grid-cols-2 sm:grid-cols-4 gap-2 border-b border-stone-800">
+      <div className="shrink-0 px-3 py-1.5 sm:py-2.5 grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2 border-b border-stone-800">
         <Tile n={counts.wip}     total={counts.total} label="In progress"   stripe={STATE.wip.tile} />
         <Tile n={counts.ready}   total={counts.total} label={ui.ready}       stripe={STATE.ready.tile} />
         <Tile n={counts.waiting} total={counts.total} label={ui.waitLabel}   stripe={STATE.waiting.tile} />
@@ -407,12 +407,12 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
 
 function Tile({ n, total, label, stripe }) {
   return (
-    <div className="relative bg-stone-900 border border-stone-800 rounded-xl px-3 py-2.5 overflow-hidden">
+    <div className="relative bg-stone-900 border border-stone-800 rounded-xl px-3 py-1.5 sm:py-2.5 overflow-hidden">
       <span className={`absolute left-0 top-0 bottom-0 w-1 ${stripe}`} />
-      <p className="text-2xl sm:text-3xl font-extrabold tabular-nums leading-none">
+      <p className="text-xl sm:text-3xl font-extrabold tabular-nums leading-none">
         {n}{total != null && <span className="text-stone-500">/{total}</span>}
       </p>
-      <p className="text-[10px] uppercase tracking-wider text-stone-500 font-semibold mt-1 leading-tight truncate">{label}</p>
+      <p className="text-[10px] uppercase tracking-wider text-stone-500 font-semibold mt-0.5 sm:mt-1 leading-tight truncate">{label}</p>
     </div>
   )
 }

@@ -288,11 +288,18 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
       const { job, created } = await findOrCreateJob(poNumber, partNumber)
       const existing = jobs.find(j => j.job_id === job.job_id)
 
+      if (existing) {
+        // Already on their list — just resume it with the same activity/work
+        // type as before, no re-prompt (see directResume).
+        await directResume(job.job_id)
+        return
+      }
+
       // What's already done on this machine (shared jobs) — shown in the modal
       const progress = created ? null : await getWeldProgress(job.job_id).catch(() => null)
 
       // Warn if this employee has already completed this job
-      if (!created && !existing) {
+      if (!created) {
         const alreadyDone = await employeeHasCompletedJob(employee.employee_id, job.job_id)
         if (alreadyDone) {
           setModal({ type: 'already_complete', job, progress })
@@ -302,7 +309,7 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
 
       setModal({
         type:       'job_action',
-        action:     existing ? 'resume' : 'start',
+        action:     'start',
         jobId:      job.job_id,
         wasCreated: created,
         job,
@@ -313,6 +320,34 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
       setError('Failed to look up job — check connection.')
     } finally {
       setScanning(false)
+    }
+  }
+
+  // Resume with whatever activity/work type was last used on this job — no
+  // re-prompt. They're almost always continuing the exact same thing; if it
+  // genuinely changed, that's what the Edit button is for. Falls back to the
+  // picker only if there's no prior tag to reuse (e.g. a legacy job).
+  async function directResume(jobId) {
+    const job = jobs.find(j => j.job_id === jobId)
+    const tag = job ? getLastTag(job.events) : {}
+    if (!tag.activity_type) {
+      setModal({ type: 'job_action', action: 'resume', jobId })
+      return
+    }
+    try {
+      if (splitMode) {
+        const newCount = activeCount + 1
+        await updateSplitCounts(newCount)
+        const ev = await resumeJob(employee.employee_id, jobId, tag.activity_type, tag.work_type, newCount)
+        appendEvent(jobId, ev)
+      } else {
+        await pauseActive()
+        const ev = await resumeJob(employee.employee_id, jobId, tag.activity_type, tag.work_type, 1)
+        appendEvent(jobId, ev)
+      }
+    } catch (err) {
+      console.error(err)
+      setError('Resume failed — check connection.')
     }
   }
 
@@ -391,7 +426,7 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
   }
 
   function handleResumeClick(jobId) {
-    setModal({ type: 'job_action', action: 'resume', jobId })
+    directResume(jobId)
   }
 
   function handleEditClick(jobId) {
