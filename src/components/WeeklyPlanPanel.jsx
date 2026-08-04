@@ -166,7 +166,7 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
             ? 'bg-amber-500 hover:bg-amber-400 text-stone-950'
             : 'bg-blue-500 hover:bg-blue-400 text-white'
         }`}>
-        ▶ Start
+        {job._state === 'wip' && onList ? '▶ Resume' : '▶ Start'}
       </button>
     ) : (
       <span className="px-4 py-2 rounded-xl text-center font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-700/40 text-sm shrink-0">✓ {ui.done}</span>
