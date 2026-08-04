@@ -339,6 +339,13 @@ export function asWeek(value) {
   return weekNumber(value)
 }
 
+// "O/S" in a stage's completed-week column means that stage is being done by
+// an outside supplier, not by us — it's never going to get a real week number
+// and it isn't something our own department needs to action.
+export function isOutsourced(value) {
+  return String(value ?? '').trim().toUpperCase() === 'O/S'
+}
+
 // The exact fill colours read from the "DELIVERED TO" column of the actual
 // workbook (checked customer-by-customer — no conflicting colours found for
 // any customer across all rows). Cells with no fill (alpha 00) are omitted

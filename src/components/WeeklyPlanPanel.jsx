@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   fetchDeptPlan, fetchDeptJobStatuses, fetchDeptActiveWork, fetchWeldCellStatus,
   fetchDeptJobLines, fetchAssemblyLineNames,
-  isoWeek, jobKey, asWeek, WELD_CELLS, WELD_CELL_LABEL, customerPillStyle,
+  isoWeek, jobKey, asWeek, isOutsourced, WELD_CELLS, WELD_CELL_LABEL, customerPillStyle,
 } from '../lib/plan'
 import AssignWorkerModal from './AssignWorkerModal'
 
@@ -93,10 +93,15 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
     // Planner marked this stage done: a week number in the dept's own column
     // (e.g. weld → "W"). The planned week is kept, so trackability stays intact.
     if (ui.completed && asWeek(job[ui.completed]) != null) return 'done'
+    // This stage is being done by an outside supplier — not our work at all,
+    // so it shouldn't sit in ready/waiting waiting on us to touch it.
+    if (ui.completed && isOutsourced(job[ui.completed])) return 'outsourced'
     const st = statuses.get(jobKey(job.po_number, job.part_number))
     if (st === 'completed') return 'done'
     if (st === 'in_progress' || st === 'paused') return 'wip'
-    if (ui.upstream && asWeek(job[ui.upstream]) == null) return 'waiting'
+    // A blocking upstream stage only blocks us if it's genuinely not done yet —
+    // if it was outsourced, its output still arrives, so don't wait on it.
+    if (ui.upstream && asWeek(job[ui.upstream]) == null && !isOutsourced(job[ui.upstream])) return 'waiting'
     return 'ready'
   }
 
@@ -109,6 +114,7 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
     // selected — since the point is finding a job when you don't know its week.
     const source = searching ? [...plan.byWeek.values()].flat() : (week != null ? plan.byWeek.get(week) ?? [] : [])
     let list = source.map(j => ({ ...j, _state: stateOf(j) }))
+      .filter(j => j._state !== 'outsourced')
     if (searching) {
       list = list.filter(j =>
         String(j.part_number ?? '').toLowerCase().includes(q) ||
