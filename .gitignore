@@ -5,3 +5,4 @@ dist/
 
 # Exported build-plan data (contains live PO/customer/part data — keep out of git)
 supabase/build_plan.csv
+supabase/sync_logs/
