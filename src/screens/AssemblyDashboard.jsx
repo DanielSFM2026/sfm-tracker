@@ -872,6 +872,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
               message,
               employeeName: employee.full_name,
               lineName,
+              department:   'assembly',
             })
           }}
           onCancel={() => setModal(null)}

@@ -1,7 +1,7 @@
 import { supabase } from './supabase'
 
 // ── Job alerts (all departments) ─────────────────────────────────────────────
-export async function sendJobAlert({ jobId, employeeId, lineId, poNumber, partNumber, message, employeeName, lineName }) {
+export async function sendJobAlert({ jobId, employeeId, lineId, poNumber, partNumber, message, employeeName, lineName, department }) {
   // Store in DB
   await supabase.from('job_alerts').insert({
     job_id: jobId, employee_id: employeeId, line_id: lineId,
@@ -9,8 +9,9 @@ export async function sendJobAlert({ jobId, employeeId, lineId, poNumber, partNu
   })
 
   // Send email via Supabase Edge Function (avoids CORS issues with direct Resend calls)
+  // department picks which recipient list the function uses (e.g. assembly has its own)
   const { error } = await supabase.functions.invoke('send-alert', {
-    body: { poNumber, partNumber, message, employeeName, lineName },
+    body: { poNumber, partNumber, message, employeeName, lineName, department },
   })
   if (error) throw error
 }

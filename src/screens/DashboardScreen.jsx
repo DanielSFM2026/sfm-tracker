@@ -689,6 +689,7 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
               message,
               employeeName: employee.full_name,
               lineName:     'Weld Shop',
+              department:   'weld',
             })
           }}
           onCancel={() => setModal(null)}

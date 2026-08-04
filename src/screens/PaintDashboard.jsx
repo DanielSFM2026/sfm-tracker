@@ -271,6 +271,7 @@ function ActiveBatchPanel({ batch, jobs: jobsProp, stage, startedAt, team, emplo
       message,
       employeeName: employee.full_name,
       lineName:     `Paint — ${STAGE_LABEL[stage]}${batch.booth_number ? ` (Booth ${batch.booth_number})` : ''}`,
+      department:   'paint',
     })
   }
 
