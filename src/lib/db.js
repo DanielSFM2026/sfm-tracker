@@ -627,6 +627,22 @@ export async function managerResumeAssemblyJob(jobId, lineId, memberIds) {
   await setJobStatus(jobId, 'in_progress')
 }
 
+// Which line (if any) a job is currently running on — lets the Weekly Plan
+// picker join someone directly onto an already-active job's line, instead of
+// re-asking which line when that's already decided by whoever started it.
+export async function getJobLineId(jobId) {
+  const { data, error } = await supabase
+    .from('job_events')
+    .select('line_id')
+    .eq('job_id', jobId)
+    .not('line_id', 'is', null)
+    .order('event_timestamp', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  return data?.line_id ?? null
+}
+
 // ── Add / remove a team member from a specific assembly job ───────────────────
 
 export async function addTeamMemberToJob(employeeId, jobId, lineId, splitCount = 1, startTime) {

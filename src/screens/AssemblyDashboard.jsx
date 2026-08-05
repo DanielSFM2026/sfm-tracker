@@ -4,7 +4,7 @@ import {
   addTeamMemberToJob, removeTeamMemberFromJob, removeTeamMemberPermanently,
   startAssemblyJob, holdAssemblyJob, completeAssemblyJob, fetchBreakRules,
   prepareManagerLineStart, onManagerLineEnd, setJobStatus, sendJobAlert,
-  fetchDepartmentEmployees, deleteCreatedJob
+  fetchDepartmentEmployees, deleteCreatedJob, getJobLineId
 } from '../lib/db'
 import { isJobActive, calcElapsed, formatDuration } from '../lib/timeCalc'
 import { HOLD_REASONS } from '../lib/constants'
@@ -499,6 +499,32 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
     startAssemblyFlow(raw.slice(0, idx).trim(), raw.slice(idx + 1).trim())
   }
 
+  // Join an already-running job directly on the line it's already on — no
+  // line-picker, since that was already decided by whoever started it.
+  // If I'm currently active on a different job, pause me off that one first
+  // (a line/job swap in one tap, instead of pause-then-separately-join).
+  async function joinActiveAssemblyJob(job, lineId) {
+    setScanning(true); setError('')
+    try {
+      const myActiveJob = jobs.find(j =>
+        j.job_id !== job.job_id &&
+        j.team.some(m => m.employee_id === employee.employee_id && isJobActive(m.events))
+      )
+      if (myActiveJob) await handleToggleSelf(myActiveJob.job_id)
+
+      const splitCount = isLM ? await prepareManagerLineStart(employee.employee_id, lineId) : 1
+      await addTeamMemberToJob(employee.employee_id, job.job_id, lineId, splitCount)
+      await setJobStatus(job.job_id, 'in_progress')
+      const fresh = await loadMyAssemblyJobs(employee.employee_id)
+      setJobs(fresh)
+    } catch (err) {
+      console.error(err)
+      setError('Could not join job — check connection.')
+    } finally {
+      setScanning(false)
+    }
+  }
+
   // Shared by the scanner and the Weekly Plan picker
   async function startAssemblyFlow(po, part) {
     setScanning(true); setError('')
@@ -508,8 +534,14 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
         setError(`PO ${po} / ${part} is already on your list.`)
         return
       }
-      // Job already exists in DB — confirm before joining
+      // Job already exists — if it's already running on a line, join it
+      // directly; otherwise fall back to the normal "start it" flow.
       if (!created) {
+        const lineId = await getJobLineId(job.job_id)
+        if (lineId != null) {
+          await joinActiveAssemblyJob(job, lineId)
+          return
+        }
         setModal({ type: 'job_exists_confirm', job })
         return
       }
