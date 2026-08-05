@@ -348,7 +348,6 @@ function AssemblyJobCard({ job, currentEmployee, breakRules, isLM, onToggleSelf,
         <div className="flex flex-wrap gap-2 mb-4">
           {visibleTeam.map(m => {
             const isMe     = m.employee_id === currentEmployee.employee_id
-            const isThisLM = m.is_line_manager
             const active   = isJobActive(m.events)
             const tappable = isMe || isLM
 
@@ -373,7 +372,6 @@ function AssemblyJobCard({ job, currentEmployee, breakRules, isLM, onToggleSelf,
                   tappable ? 'cursor-pointer active:scale-95' : 'cursor-default select-none',
                 ].join(' ')}
               >
-                {isThisLM && <span className="font-bold text-[10px] tracking-wider text-amber-500">LM</span>}
                 {isMe ? '● You' : m.full_name}
               </button>
             )
@@ -428,7 +426,9 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
   const [breakRules, setBreakRules] = useState(appBreakRules ?? [])
   const [completedRefresh, setCompletedRefresh] = useState(0)
 
-  const isLM     = !!employee.is_line_manager
+  // Everyone on assembly gets full line-manager-level access now — no
+  // separate LM role, so no point gating features or badging names by it.
+  const isLM     = true
   const scanRef  = useRef(null)
   const bufRef   = useRef('')
   const inactRef = useRef(null)
@@ -715,7 +715,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
       <div className="bg-stone-900 border-b border-stone-700 px-5 py-4 flex items-center justify-between shrink-0">
         <div>
           <p className="text-xs text-stone-500 uppercase tracking-widest">
-            Assembly{isLM ? ' · Line Manager' : ''}
+            Assembly
           </p>
           <p className="text-xl font-bold text-stone-100">{employee.full_name}</p>
         </div>
