@@ -362,6 +362,8 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
+            enterKeyHint="done"
             placeholder={`Search part, PO, customer, description… (week ${week ?? ''})`}
             className="w-full bg-stone-900 border border-stone-700 focus:border-amber-500 rounded-xl pl-9 pr-9 py-2.5 text-stone-100 text-sm outline-none placeholder-stone-600"
           />
