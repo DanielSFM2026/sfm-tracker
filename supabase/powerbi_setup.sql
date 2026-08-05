@@ -7,10 +7,13 @@
 -- Power BI sees the same hours the app shows, without re-deriving the logic.
 
 -- ── Break-time helper (mirrors subtractBreaks in timeCalc.js) ────────────────
+-- search_path pinned so this can't be tricked by a shadowing object earlier
+-- in a caller's search_path (flagged by Supabase's linter otherwise).
 create or replace function public.pb_break_seconds(p_start timestamptz, p_end timestamptz)
 returns numeric
 language plpgsql
 stable
+set search_path = public
 as $$
 declare
   rule record;
@@ -76,6 +79,12 @@ left join public.assembly_lines al on al.line_id = i.line_id;
 comment on view public.powerbi_job_time is
   'Actual worked hours per job/employee interval, break-time deducted and split-count applied — matches the app''s live timers. One row per worked interval; sum(hours) grouped by job/department for totals.';
 
+-- security_invoker: without this, the view runs with the view OWNER's
+-- privileges rather than the querying role's — flagged as a Security
+-- Definer View error by Supabase's linter. With it on, powerbi_reader
+-- needs its own grant on every table the view touches (see below).
+alter view public.powerbi_job_time set (security_invoker = true);
+
 -- ── Read-only role for Power BI ────────────────────────────────────────────────
 -- Password is set separately (not committed here) — see the Supabase dashboard
 -- under Database > Roles, or rotate it with:
@@ -89,6 +98,10 @@ end
 $$;
 
 grant usage on schema public to powerbi_reader;
+-- Note: with security_invoker on, powerbi_job_time runs as powerbi_reader —
+-- so it needs SELECT on every table the view's query touches (job_events,
+-- employees, jobs, assembly_lines, break_rules), not just the view itself.
 grant select on public.job_alerts, public.build_plan, public.powerbi_job_time,
-                 public.employees, public.jobs, public.assembly_lines to powerbi_reader;
+                 public.employees, public.jobs, public.assembly_lines,
+                 public.job_events, public.break_rules to powerbi_reader;
 -- Keep future tables out by default — grant new ones explicitly as they're added.
