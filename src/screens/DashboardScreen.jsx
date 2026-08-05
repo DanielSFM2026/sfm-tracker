@@ -12,6 +12,7 @@ import {
 } from '../lib/db'
 import { isJobActive, parseJobBarcode } from '../lib/timeCalc'
 import JobCard from '../components/JobCard'
+import CompletedSection from '../components/CompletedSection'
 import AlertModal from '../components/AlertModal'
 import PauseReasonModal from '../components/PauseReasonModal'
 import WeeklyPlanPanel from '../components/WeeklyPlanPanel'
@@ -195,6 +196,7 @@ function ConfirmModal({ job, onConfirm, onCancel }) {
 // ── Main dashboard ────────────────────────────────────────────────────────────
 export default function DashboardScreen({ employee, initialJobs, initialSplitMode, breakRules, onLogout }) {
   const [jobs, setJobs]           = useState(initialJobs)
+  const [completedRefresh, setCompletedRefresh] = useState(0)
   const [splitMode, setSplitMode] = useState(initialSplitMode)
   const [error, setError]         = useState('')
   const [scanning, setScanning]   = useState(false)
@@ -452,6 +454,7 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
     try {
       const result = await completeJob(employee.employee_id, jobId)
       setJobs(prev => prev.filter(j => j.job_id !== jobId))
+      setCompletedRefresh(n => n + 1)
 
       if (splitMode) {
         const remaining = jobs.filter(j => isJobActive(j.events) && j.job_id !== jobId)
@@ -625,6 +628,7 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
             />
           ))
         )}
+        <CompletedSection employeeId={employee.employee_id} refreshKey={completedRefresh} />
       </div>
 
       {/* Manual entry modal */}

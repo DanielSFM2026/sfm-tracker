@@ -18,6 +18,7 @@ import {
 } from '../lib/db'
 import { parseJobBarcode, formatDuration } from '../lib/timeCalc'
 import AlertModal from '../components/AlertModal'
+import CompletedSection from '../components/CompletedSection'
 
 const INACTIVITY_MS = 75_000
 
@@ -357,6 +358,7 @@ function BlastView({ employee, onLogout, resetInactivity }) {
   const [modal, setModal]       = useState(null)
   const [error, setError]       = useState('')
   const [scanning, setScanning] = useState(false)
+  const [completedRefresh, setCompletedRefresh] = useState(0)
 
   const scanRef    = useRef(null)
   const bufRef     = useRef('')
@@ -479,6 +481,7 @@ function BlastView({ employee, onLogout, resetInactivity }) {
       batchIdRef.current = null
       setBatch(null); setJobs([]); setStartedAt(null)
       setTeam([{ employee_id: employee.employee_id, full_name: employee.full_name }])
+      setCompletedRefresh(n => n + 1)
       setPhase('idle')
     } catch { setError('Failed to complete — check connection.'); setPhase('active') }
   }
@@ -579,6 +582,7 @@ function BlastView({ employee, onLogout, resetInactivity }) {
       {modal?.type === 'manual_job'      && <ManualScanModal title="Enter Job Barcode" placeholder="PO/PART" onSubmit={v => { setModal(null); handleJobScan(v) }} onCancel={() => setModal(null)} />}
       {modal?.type === 'confirm_start'   && <ConfirmModal title="Start Blast?" message={`${jobs.length} job${jobs.length !== 1 ? 's' : ''} · ${team.length} team member${team.length !== 1 ? 's' : ''}`} confirmLabel="Start Blast ▶" onConfirm={handleStartConfirm} onCancel={() => setModal(null)} />}
       {modal?.type === 'confirm_complete'&& <ConfirmModal title="Complete Blast?" message="Batch will move to the Prep queue." confirmLabel="Complete ✓" onConfirm={handleCompleteConfirm} onCancel={() => setModal(null)} />}
+      <CompletedSection employeeId={employee.employee_id} refreshKey={completedRefresh} />
     </div>
   )
 }
@@ -627,6 +631,7 @@ function PrepView({ employee }) {
   const [modal, setModal]             = useState(null)
   const [error, setError]             = useState('')
   const [scanning, setScanning]       = useState(false)
+  const [completedRefresh, setCompletedRefresh] = useState(0)
 
   const phaseRef   = useRef('loading')
   const batchIdRef = useRef(null)
@@ -730,6 +735,7 @@ function PrepView({ employee }) {
       batchIdRef.current = null
       setBatch(null); setJobs([]); setStartedAt(null)
       setTeam([{ employee_id: employee.employee_id, full_name: employee.full_name }])
+      setCompletedRefresh(n => n + 1)
       await refreshPool()
       setPhase('pool')
     } catch { setError('Failed to complete — check connection.'); setPhase('active') }
@@ -824,6 +830,7 @@ function PrepView({ employee }) {
       {modal?.type === 'pick_booth'       && <BoothPickerModal boothStatus={boothStatus} selectedCount={selected.size} onPick={handleBoothPick} onCancel={() => setModal(null)} />}
       {modal?.type === 'confirm_start'    && <ConfirmModal title="Start Prep?" message={`${jobs.length} job${jobs.length !== 1 ? 's' : ''} · ${team.length} team member${team.length !== 1 ? 's' : ''}`} confirmLabel="Start Prep ▶" onConfirm={handleStartConfirm} onCancel={() => setModal(null)} />}
       {modal?.type === 'confirm_complete' && <ConfirmModal title="Complete Prep?" message="Booth will move to the Paint queue." confirmLabel="Complete ✓" onConfirm={handleCompleteConfirm} onCancel={() => setModal(null)} />}
+      <CompletedSection employeeId={employee.employee_id} refreshKey={completedRefresh} />
     </div>
   )
 }
@@ -839,6 +846,7 @@ function StageView({ employee, stage }) {
   const [modal, setModal]         = useState(null)
   const [error, setError]         = useState('')
   const [scanning, setScanning]   = useState(false)
+  const [completedRefresh, setCompletedRefresh] = useState(0)
 
   const phaseRef   = useRef('loading')
   const batchIdRef = useRef(null)
@@ -918,6 +926,7 @@ function StageView({ employee, stage }) {
       batchIdRef.current = null
       setBatch(null); setJobs([]); setStartedAt(null)
       setTeam([{ employee_id: employee.employee_id, full_name: employee.full_name }])
+      setCompletedRefresh(n => n + 1)
       await refreshQueue()
       setPhase('queue')
     } catch { setError('Failed to complete.'); setPhase('active') }
@@ -985,6 +994,7 @@ function StageView({ employee, stage }) {
 
       {modal?.type === 'confirm_start'    && <ConfirmModal title={`Start ${STAGE_LABEL[stage]}?`} message={`${jobs.length} job${jobs.length !== 1 ? 's' : ''} · ${team.length} team member${team.length !== 1 ? 's' : ''}`} confirmLabel={`Start ${STAGE_LABEL[stage]} ▶`} onConfirm={handleStartConfirm} onCancel={() => setModal(null)} />}
       {modal?.type === 'confirm_complete' && <ConfirmModal title={`Complete ${STAGE_LABEL[stage]}?`} message={stage === 'pack' ? 'Batch fully complete.' : `Moves to ${STAGE_LABEL[{ paint: 'pack' }[stage] ?? 'pack']} queue.`} confirmLabel="Complete ✓" onConfirm={handleCompleteConfirm} onCancel={() => setModal(null)} />}
+      <CompletedSection employeeId={employee.employee_id} refreshKey={completedRefresh} />
     </div>
   )
 }

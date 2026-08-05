@@ -126,6 +126,33 @@ export async function loadEmployeeJobs(employeeId) {
   return result
 }
 
+// ── Recently completed jobs (home-screen "Completed" section, all depts) ─────
+// A COMPLETE event with this employee's id is how every department already
+// records "I finished this" — weld/kitting job completion, each paint batch
+// stage, each assembly member's own completion — so one query covers all four
+// screens with no department-specific logic needed.
+export async function fetchRecentCompletedJobs(employeeId, days = 7) {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+  const { data, error } = await supabase
+    .from('job_events')
+    .select('event_id, job_id, event_timestamp, jobs ( po_number, part_number, quantity )')
+    .eq('employee_id', employeeId)
+    .eq('event_type', 'COMPLETE')
+    .gte('event_timestamp', since)
+    .order('event_timestamp', { ascending: false })
+  if (error) throw error
+  return (data ?? [])
+    .filter(r => r.jobs)
+    .map(r => ({
+      event_id:    r.event_id,
+      job_id:      r.job_id,
+      po_number:   r.jobs.po_number,
+      part_number: r.jobs.part_number,
+      quantity:    r.jobs.quantity,
+      completed_at: r.event_timestamp,
+    }))
+}
+
 // ── Find or create a job by PO + part ────────────────────────────────────────
 
 export async function findOrCreateJob(poNumber, partNumber, department = 'weld') {

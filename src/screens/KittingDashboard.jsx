@@ -3,6 +3,7 @@ import { findOrCreateJob, setJobStatus, completeJob, cancelMyJob } from '../lib/
 import { parseJobBarcode, formatDuration } from '../lib/timeCalc'
 import { supabase } from '../lib/supabase'
 import WeeklyPlanPanel from '../components/WeeklyPlanPanel'
+import CompletedSection from '../components/CompletedSection'
 import { jobKey } from '../lib/plan'
 
 const INACTIVITY_MS = 120_000
@@ -94,6 +95,7 @@ function KitCard({ job, onComplete, onCancel }) {
 
 export default function KittingDashboard({ employee, onLogout }) {
   const [jobs, setJobs]     = useState([])
+  const [completedRefresh, setCompletedRefresh] = useState(0)
   const [modal, setModal]   = useState(null)
   const [error, setError]   = useState('')
   const [scanning, setScanning] = useState(false)
@@ -190,6 +192,7 @@ export default function KittingDashboard({ employee, onLogout }) {
     try {
       await completeJob(employee.employee_id, job.job_id)
       setJobs(prev => prev.filter(j => j.job_id !== job.job_id))
+      setCompletedRefresh(n => n + 1)
     } catch (err) {
       console.error(err)
       setError('Complete failed — check connection.')
@@ -281,6 +284,7 @@ export default function KittingDashboard({ employee, onLogout }) {
               onCancel={job => setModal({ job, cancel: true })} />
           ))
         )}
+        <CompletedSection employeeId={employee.employee_id} refreshKey={completedRefresh} />
       </div>
 
       {showManual && (

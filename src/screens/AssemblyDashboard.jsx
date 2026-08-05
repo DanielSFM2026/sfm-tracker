@@ -10,6 +10,7 @@ import { isJobActive, calcElapsed, formatDuration } from '../lib/timeCalc'
 import { HOLD_REASONS } from '../lib/constants'
 import AlertModal from '../components/AlertModal'
 import WeeklyPlanPanel from '../components/WeeklyPlanPanel'
+import CompletedSection from '../components/CompletedSection'
 import { jobKey } from '../lib/plan'
 
 const INACTIVITY_MS = 120_000
@@ -425,6 +426,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
   const [showPlan, setShowPlan] = useState(false)
   const [deptEmployees, setDeptEmployees] = useState(null)
   const [breakRules, setBreakRules] = useState(appBreakRules ?? [])
+  const [completedRefresh, setCompletedRefresh] = useState(0)
 
   const isLM     = !!employee.is_line_manager
   const scanRef  = useRef(null)
@@ -682,6 +684,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
     try {
       await completeAssemblyJob(jobId, job.line_id, activeIds)
       setJobs(prev => prev.filter(j => j.job_id !== jobId))
+      setCompletedRefresh(n => n + 1)
     } catch (err) {
       console.error(err)
       setError('Complete failed.')
@@ -801,6 +804,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
             onAlert={job => setModal({ type: 'alert', job })}
           />
         ))}
+        <CompletedSection employeeId={employee.employee_id} refreshKey={completedRefresh} />
       </div>
 
       {/* Modals */}
