@@ -501,19 +501,27 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
 
   // Join an already-running job directly on the line it's already on — no
   // line-picker, since that was already decided by whoever started it.
-  // If I'm currently active on a different job, pause me off that one first
-  // (a line/job swap in one tap, instead of pause-then-separately-join).
-  async function joinActiveAssemblyJob(job, lineId) {
+  // mode: 'swap' pauses whatever I'm currently active on first (a genuine
+  // line/job swap in one tap); 'split' leaves it running and divides my
+  // time between both, via the same prepareManagerLineStart mechanism
+  // used everywhere else time gets split across concurrent jobs.
+  async function joinActiveAssemblyJob(job, lineId, mode = 'swap') {
     setScanning(true); setError('')
     try {
-      const myActiveJob = jobs.find(j =>
-        j.job_id !== job.job_id &&
-        j.team.some(m => m.employee_id === employee.employee_id && isJobActive(m.events))
-      )
-      if (myActiveJob) await handleToggleSelf(myActiveJob.job_id)
-
-      const splitCount = isLM ? await prepareManagerLineStart(employee.employee_id, lineId) : 1
-      await addTeamMemberToJob(employee.employee_id, job.job_id, lineId, splitCount)
+      if (mode === 'swap') {
+        const myActiveJob = jobs.find(j =>
+          j.job_id !== job.job_id &&
+          j.team.some(m => m.employee_id === employee.employee_id && isJobActive(m.events))
+        )
+        if (myActiveJob) await handleToggleSelf(myActiveJob.job_id)
+        await addTeamMemberToJob(employee.employee_id, job.job_id, lineId, 1)
+      } else {
+        // Split: prepareManagerLineStart pauses+resumes everything I'm
+        // already active on at the new higher split count, then I start
+        // the new job at that same count.
+        const splitCount = await prepareManagerLineStart(employee.employee_id, lineId)
+        await addTeamMemberToJob(employee.employee_id, job.job_id, lineId, splitCount)
+      }
       await setJobStatus(job.job_id, 'in_progress')
       const fresh = await loadMyAssemblyJobs(employee.employee_id)
       setJobs(fresh)
@@ -534,12 +542,21 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
         setError(`PO ${po} / ${part} is already on your list.`)
         return
       }
-      // Job already exists — if it's already running on a line, join it
-      // directly; otherwise fall back to the normal "start it" flow.
+      // Job already exists — if it's already running on a line, join it;
+      // otherwise fall back to the normal "start it" flow.
       if (!created) {
         const lineId = await getJobLineId(job.job_id)
         if (lineId != null) {
-          await joinActiveAssemblyJob(job, lineId)
+          const myActiveJob = jobs.find(j =>
+            j.job_id !== job.job_id &&
+            j.team.some(m => m.employee_id === employee.employee_id && isJobActive(m.events))
+          )
+          if (myActiveJob) {
+            // Already active elsewhere — ask swap vs split rather than guessing.
+            setModal({ type: 'join_choice', job, lineId, myActiveJob })
+          } else {
+            await joinActiveAssemblyJob(job, lineId)
+          }
           return
         }
         setModal({ type: 'job_exists_confirm', job })
@@ -840,6 +857,31 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
       </div>
 
       {/* Modals */}
+      {modal?.type === 'join_choice' && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4">
+          <div className="bg-stone-800 border border-stone-600 rounded-2xl p-6 w-full max-w-sm text-center">
+            <p className="text-2xl mb-3">🔀</p>
+            <h2 className="text-lg font-bold text-stone-100 mb-2">You're already active on another job</h2>
+            <p className="text-stone-400 text-sm mb-1">
+              Currently: <strong className="text-stone-200">PO {modal.myActiveJob.po_number}</strong>
+            </p>
+            <p className="text-stone-400 text-sm mb-6">
+              Joining: <strong className="text-stone-200">PO {modal.job.po_number} · {modal.job.part_number}</strong>
+            </p>
+            <div className="flex flex-col gap-3">
+              <button className="btn-primary py-3"
+                onClick={() => { const m = modal; setModal(null); joinActiveAssemblyJob(m.job, m.lineId, 'split') }}>
+                ➗ Work Both — Split My Time
+              </button>
+              <button className="btn-secondary py-3"
+                onClick={() => { const m = modal; setModal(null); joinActiveAssemblyJob(m.job, m.lineId, 'swap') }}>
+                🔀 Switch — Pause the Other Job
+              </button>
+              <button className="text-sm text-stone-500 underline pt-1" onClick={() => setModal(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
       {modal?.type === 'job_exists_confirm' && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4">
           <div className="bg-stone-800 border border-stone-600 rounded-2xl p-6 w-full max-w-sm text-center">
