@@ -3,11 +3,11 @@ import {
   fetchAssemblyLines, loadMyAssemblyJobs, findOrCreateJob,
   addTeamMemberToJob, removeTeamMemberFromJob, removeTeamMemberPermanently,
   startAssemblyJob, holdAssemblyJob, completeAssemblyJob, fetchBreakRules,
-  prepareManagerLineStart, onManagerLineEnd, setJobStatus, sendJobAlert,
+  prepareManagerLineStart, onManagerLineEnd, setJobStatus, sendJobAlert, sendHoldAlert,
   fetchDepartmentEmployees, deleteCreatedJob, getJobLineId
 } from '../lib/db'
 import { isJobActive, calcElapsed, formatDuration } from '../lib/timeCalc'
-import { HOLD_REASONS } from '../lib/constants'
+import { HOLD_REASONS, HOLD_REASON_LABEL } from '../lib/constants'
 import AlertModal from '../components/AlertModal'
 import WeeklyPlanPanel from '../components/WeeklyPlanPanel'
 import CompletedSection from '../components/CompletedSection'
@@ -702,6 +702,19 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
     try {
       const events = await holdAssemblyJob(jobId, job.line_id, reason, activeIds)
       const now    = events[0]?.event_timestamp ?? new Date().toISOString()
+
+      // Assembly always has a real reason (no "just pause" option here), so
+      // every hold emails out.
+      const lineName = lines.find(l => l.line_id === job.line_id)?.line_name ?? 'Assembly'
+      sendHoldAlert({
+        poNumber: job.po_number,
+        partNumber: job.part_number,
+        reasonLabel: HOLD_REASON_LABEL[reason] ?? reason,
+        employeeName: employee.full_name,
+        lineName,
+        department: 'assembly',
+      }).catch(err => console.error('Hold alert email failed:', err))
+
       setJobs(prev => prev.map(j =>
         j.job_id !== jobId ? j : {
           ...j,

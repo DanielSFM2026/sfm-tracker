@@ -7,10 +7,12 @@ import {
   completeJob,
   employeeHasCompletedJob,
   sendJobAlert,
+  sendHoldAlert,
   getWeldProgress,
   deleteCreatedJob,
 } from '../lib/db'
 import { isJobActive, parseJobBarcode } from '../lib/timeCalc'
+import { HOLD_REASON_LABEL } from '../lib/constants'
 import JobCard from '../components/JobCard'
 import CompletedSection from '../components/CompletedSection'
 import AlertModal from '../components/AlertModal'
@@ -411,6 +413,22 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
     try {
       const ev = await pauseJob(employee.employee_id, jobId, holdReason)
       appendEvent(jobId, ev)
+
+      // "Other / Just Pause" passes null — that's downtime with no real
+      // reason to report, so it never emails. A real hold reason does.
+      if (holdReason) {
+        const job = jobs.find(j => j.job_id === jobId)
+        if (job) {
+          sendHoldAlert({
+            poNumber: job.po_number,
+            partNumber: job.part_number,
+            reasonLabel: HOLD_REASON_LABEL[holdReason] ?? holdReason,
+            employeeName: employee.full_name,
+            lineName: 'Weld Shop',
+            department: 'weld',
+          }).catch(err => console.error('Hold alert email failed:', err))
+        }
+      }
 
       if (splitMode) {
         // Remaining active jobs after this pause

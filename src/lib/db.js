@@ -1,5 +1,15 @@
 import { supabase } from './supabase'
 
+// Send the alert email only (no job_alerts row) — for system-triggered
+// notifications like a hold reason, as opposed to a worker's own free-text
+// "report an issue". Keeps job_alerts as purely worker-reported issues.
+async function emailAlert({ poNumber, partNumber, message, employeeName, lineName, department }) {
+  const { error } = await supabase.functions.invoke('send-alert', {
+    body: { poNumber, partNumber, message, employeeName, lineName, department },
+  })
+  if (error) throw error
+}
+
 // ── Job alerts (all departments) ─────────────────────────────────────────────
 export async function sendJobAlert({ jobId, employeeId, lineId, poNumber, partNumber, message, employeeName, lineName, department }) {
   // Store in DB
@@ -7,13 +17,18 @@ export async function sendJobAlert({ jobId, employeeId, lineId, poNumber, partNu
     job_id: jobId, employee_id: employeeId, line_id: lineId,
     po_number: poNumber, part_number: partNumber, message,
   })
-
-  // Send email via Supabase Edge Function (avoids CORS issues with direct Resend calls)
   // department picks which recipient list the function uses (e.g. assembly has its own)
-  const { error } = await supabase.functions.invoke('send-alert', {
-    body: { poNumber, partNumber, message, employeeName, lineName, department },
+  await emailAlert({ poNumber, partNumber, message, employeeName, lineName, department })
+}
+
+// ── Hold alert (weld with a real reason, assembly always) ────────────────────
+// "Other / Just Pause" on weld passes no reasonLabel and should never call this.
+export async function sendHoldAlert({ poNumber, partNumber, reasonLabel, employeeName, lineName, department }) {
+  await emailAlert({
+    poNumber, partNumber,
+    message: `Job put on hold — reason: ${reasonLabel}`,
+    employeeName, lineName, department,
   })
-  if (error) throw error
 }
 
 // All flagged alerts in a date range, with employee/line/department context —
