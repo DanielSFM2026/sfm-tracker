@@ -10,6 +10,7 @@ import {
 } from '../lib/db'
 import WeeklyPlanPanel from '../components/WeeklyPlanPanel'
 import { calcElapsed, formatDuration, isJobActive, parseJobBarcode } from '../lib/timeCalc'
+import { activityLabel } from '../lib/plan'
 import { holdReasonsFor, HOLD_REASON_LABEL } from '../lib/constants'
 import PlanDashboard from '../components/PlanDashboard'
 import ManagerWeeklyPlan from '../components/ManagerWeeklyPlan'
@@ -878,11 +879,22 @@ function Dot({ active, onHold }) {
 }
 
 // ── Individual dept row ───────────────────────────────────────────────────────
+// What this worker is currently tagged as doing on this job — the most
+// recent START/RESUME event's activity/work type (e.g. "Tack · Frames").
+function lastActivityTag(events) {
+  const last = [...(events ?? [])]
+    .filter(e => e.event_type === 'START' || e.event_type === 'RESUME')
+    .sort((a, b) => new Date(b.event_timestamp) - new Date(a.event_timestamp))[0]
+  return last ? activityLabel(last.activity_type, last.work_type) : null
+}
+
 function WorkerRow({ emp, jobs, breakRules, onAction }) {
   const subLabel = SUB_DEPT_LABEL[emp.sub_department]
   return (
     <div className="border-b border-stone-700 last:border-0">
-      {jobs.map((job, i) => (
+      {jobs.map((job, i) => {
+        const tag = lastActivityTag(job.events)
+        return (
         <div key={job.job_id}
           className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-stone-800/50 active:bg-stone-700/40 transition-colors"
           onClick={() => onAction({ type: 'worker', emp, job })}>
@@ -902,13 +914,19 @@ function WorkerRow({ emp, jobs, breakRules, onAction }) {
                 </span>
               )}
             </p>
+            {tag && (
+              <span className="inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border text-amber-300 bg-amber-500/10 border-amber-700/50">
+                {tag}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <LiveTimer events={job.events} breakRules={breakRules} isActive={job.isActive} />
             <span className="text-stone-600 text-xs">›</span>
           </div>
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
