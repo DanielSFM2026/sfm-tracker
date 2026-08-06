@@ -40,10 +40,12 @@ serve(async (req) => {
     // report) vs a hold (a real reason, the line is stopped right now).
     const isHold = kind === 'hold'
     const subjectPrefix = isHold ? '⛔ LINE ON HOLD' : '🚩 FLAGGED ISSUE'
-    const bannerBg    = isHold ? '#fff7ed' : '#fef2f2'
-    const bannerColor = isHold ? '#9a3412' : '#991b1b'
+    // Flagged issues get the amber accent, holds get red — swapped from the
+    // color's usual connotation on purpose (confirmed with Daniel).
+    const bannerBg    = isHold ? '#fef2f2' : '#fff7ed'
+    const bannerColor = isHold ? '#991b1b' : '#9a3412'
     const bannerText  = isHold ? '⛔ LINE ON HOLD — production stopped' : '🚩 FLAGGED ISSUE — worker report'
-    const accentColor = isHold ? '#f97316' : '#dc2626'
+    const accentColor = isHold ? '#dc2626' : '#f97316'
 
     const res = await fetch('https://api.resend.com/emails', {
       method:  'POST',
