@@ -1084,6 +1084,7 @@ export async function loadManagerReport() {
       .from('job_events')
       .select(`
         event_id, job_id, employee_id, event_type, hold_reason, line_id, split_count, event_timestamp,
+        activity_type, work_type,
         jobs!inner ( job_id, po_number, part_number, quantity, status ),
         employees!inner ( employee_id, full_name, department, sub_department, active )
       `)
@@ -1146,7 +1147,9 @@ export async function loadManagerReport() {
         event_type:      row.event_type,
         hold_reason:     row.hold_reason,
         split_count:     row.split_count ?? 1,
-        event_timestamp: row.event_timestamp
+        event_timestamp: row.event_timestamp,
+        activity_type:   row.activity_type,
+        work_type:       row.work_type,
       })
     }
   }
