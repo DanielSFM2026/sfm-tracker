@@ -6,8 +6,9 @@ import {
   fetchDepartmentEmployees, managerStartWorkerOnJob, managerStartAssemblyJobFull,
   findOrCreateJob, addTeamMemberToJob, employeeHasCompletedJob,
   loadJobHistory, loadJobEvents, updateEventTimestamp, deleteJobEvent, addJobEvent,
-  deleteCreatedJob, fetchJobAlerts,
+  deleteCreatedJob, fetchJobAlerts, moveEmployeeJobHistory,
 } from '../lib/db'
+import WeeklyPlanPanel from '../components/WeeklyPlanPanel'
 import { calcElapsed, formatDuration, isJobActive, parseJobBarcode } from '../lib/timeCalc'
 import { holdReasonsFor, HOLD_REASON_LABEL } from '../lib/constants'
 import PlanDashboard from '../components/PlanDashboard'
@@ -103,6 +104,9 @@ function ManagerActionModal({ action, onClose, onDone }) {
   const [localMembers, setLocalMembers] = useState(() => action.members ?? [])
   const [deleteJobArm, setDeleteJobArm] = useState(false)
   const [editingRecord, setEditingRecord] = useState(null)   // record passed to EditTimestampsModal
+  const [moveTarget, setMoveTarget] = useState(null)          // { employeeId, employeeName, jobId, department, poNumber, partNumber }
+  const [moveBusy, setMoveBusy]     = useState(false)
+  const [moveError, setMoveError]   = useState('')
 
   const { type, emp, job, lineId, members } = action
   const isAssembly = type === 'assembly'
@@ -153,6 +157,23 @@ function ManagerActionModal({ action, onClose, onDone }) {
       console.error(e); setError('Failed to add worker.')
     } finally {
       setBusyAdd(null)
+    }
+  }
+
+  async function handleMoveConfirm(toPo, toPart) {
+    if (!moveTarget) return
+    setMoveBusy(true); setMoveError('')
+    try {
+      await moveEmployeeJobHistory(
+        moveTarget.employeeId, moveTarget.jobId, toPo, toPart, moveTarget.department
+      )
+      setMoveTarget(null)
+      onDone()
+    } catch (e) {
+      console.error(e)
+      setMoveError(e.message ?? 'Could not move that time — check connection.')
+    } finally {
+      setMoveBusy(false)
     }
   }
 
@@ -325,6 +346,15 @@ function ManagerActionModal({ action, onClose, onDone }) {
                         Edit log
                       </button>
                       <button
+                        onClick={() => setMoveTarget({
+                          employeeId: m.employee_id, employeeName: m.full_name,
+                          jobId: job.job_id, department: 'assembly',
+                          poNumber: job.po_number, partNumber: job.part_number,
+                        })}
+                        className="text-xs text-sky-500 underline hover:text-sky-300">
+                        Move
+                      </button>
+                      <button
                         disabled={!!busyMember || busy}
                         onClick={() => handleToggleMember(m)}
                         className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
@@ -432,6 +462,17 @@ function ManagerActionModal({ action, onClose, onDone }) {
                 📝 Edit Log
               </button>
             )}
+            {!isAssembly && (
+              <button disabled={busy}
+                className="w-full py-3 rounded-xl border border-sky-700 bg-sky-950/30 text-sky-300 text-base hover:bg-sky-900/40"
+                onClick={() => setMoveTarget({
+                  employeeId: emp.employee_id, employeeName: emp.full_name,
+                  jobId: job.job_id, department: emp.department,
+                  poNumber: job.po_number, partNumber: job.part_number,
+                })}>
+                ↪ Move to Different Job
+              </button>
+            )}
             {/* Add Worker only makes sense for assembly (shared team jobs) */}
             {isAssembly && (
               <button disabled={busy}
@@ -464,6 +505,27 @@ function ManagerActionModal({ action, onClose, onDone }) {
         onClose={() => setEditingRecord(null)}
         onSaved={() => { setEditingRecord(null); onDone() }}
       />
+    )}
+    {moveTarget && (
+      <>
+        <WeeklyPlanPanel
+          department={moveTarget.department}
+          title="Move Time — pick the destination job"
+          operatorName={`Moving ${moveTarget.employeeName}'s time off PO ${moveTarget.poNumber} · ${moveTarget.partNumber}`}
+          onPick={handleMoveConfirm}
+          onClose={() => { setMoveTarget(null); setMoveError('') }}
+          pickerMode
+        />
+        {(moveBusy || moveError) && (
+          <div className="fixed inset-x-0 bottom-6 z-[60] flex justify-center px-4 pointer-events-none">
+            <div className={`pointer-events-auto rounded-xl px-4 py-3 text-sm font-semibold shadow-lg ${
+              moveError ? 'bg-red-900 text-red-200 border border-red-700' : 'bg-stone-800 text-stone-300 border border-stone-600'
+            }`}>
+              {moveBusy ? 'Moving…' : moveError}
+            </div>
+          </div>
+        )}
+      </>
     )}
     </>
   )

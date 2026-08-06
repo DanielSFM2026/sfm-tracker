@@ -209,6 +209,44 @@ export async function deleteCreatedJob(jobId) {
   }
 }
 
+// Manager correction: move ALL of one employee's logged time on a job onto
+// a different job — for when someone was scanned onto (or scanned) the
+// wrong PO/part entirely. Every event they have on fromJobId gets
+// re-pointed to the destination job (created if it doesn't exist yet);
+// nothing about the timestamps, split_count, or event types changes, only
+// which job they're attributed to. If that leaves the original job with
+// zero events left (company-wide, not just this employee), it's deleted as
+// an orphan via the same narrow RPC "wrong scan" cleanup already uses.
+export async function moveEmployeeJobHistory(employeeId, fromJobId, toPoNumber, toPartNumber, department) {
+  const { job: toJob } = await findOrCreateJob(toPoNumber, toPartNumber, department)
+  if (toJob.job_id === fromJobId) throw new Error('That is already the same job.')
+
+  const { data: moved, error: moveErr } = await supabase
+    .from('job_events')
+    .update({ job_id: toJob.job_id })
+    .eq('employee_id', employeeId)
+    .eq('job_id', fromJobId)
+    .select('event_id, event_type')
+  if (moveErr) throw moveErr
+  if (!moved?.length) throw new Error('No time found on that job for this person.')
+
+  // If their moved history's most recent event is still open (START/RESUME),
+  // the destination job is genuinely active again.
+  const stillOpen = moved.some(e => e.event_type === 'START' || e.event_type === 'RESUME')
+  if (stillOpen) await setJobStatus(toJob.job_id, 'in_progress')
+
+  // Clean up the source job if nothing (from anyone) is left on it.
+  const { count } = await supabase
+    .from('job_events').select('event_id', { count: 'exact', head: true }).eq('job_id', fromJobId)
+  if (!count) {
+    const { error } = await supabase.rpc('app_delete_job', { p_job_id: fromJobId })
+    if (error) throw error
+  }
+
+  await rebalanceEmployeeSplit(employeeId)
+  return toJob
+}
+
 // Worker backs out of a job they scanned by mistake: removes only their own
 // events; the job row goes too if nobody else has ever touched it
 export async function cancelMyJob(jobId, employeeId) {

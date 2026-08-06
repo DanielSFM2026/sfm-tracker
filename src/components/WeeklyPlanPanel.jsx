@@ -43,7 +43,12 @@ function useClock() {
 // operatorName, onPick, onClose — worker (full-screen) mode.
 // embedded — true for the manager view: no fixed overlay, no Close/clock, no
 //   Start/Resume buttons (managers browse, they don't clock jobs in from here).
-export default function WeeklyPlanPanel({ department, title, operatorName, activeKeys, onPick, onClose, embedded = false }) {
+// pickerMode — true when the panel is just "choose a job" (e.g. moving a
+//   person's logged time onto a different job) rather than clocking work.
+//   Every row gets a plain "Select" button regardless of ready/waiting/wip/
+//   done/outsourced state, since a destination job's current status is
+//   irrelevant to picking it.
+export default function WeeklyPlanPanel({ department, title, operatorName, activeKeys, onPick, onClose, embedded = false, pickerMode = false }) {
   const ui = DEPT_UI[department] ?? DEPT_UI.weld
   const [plan, setPlan]         = useState(null)
   const [statuses, setStatuses] = useState(new Map())
@@ -169,7 +174,12 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
     ) : (
       <span className="px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-700/40 shrink-0">✓ {ui.done}</span>
     )
-    const actionEl = embedded ? (
+    const actionEl = pickerMode ? (
+      <button onClick={() => onPick(job.po_number, job.part_number)}
+        className="px-4 py-2 rounded-lg border border-sky-600 bg-sky-900/30 text-sky-300 text-xs font-semibold hover:bg-sky-900/50 shrink-0">
+        Select
+      </button>
+    ) : embedded ? (
       canStart ? (
         <button onClick={() => setAssignJob(job)}
           className="px-4 py-2 rounded-lg border border-stone-600 bg-stone-800 text-stone-300 text-xs font-semibold hover:bg-stone-700 shrink-0">
@@ -383,7 +393,7 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
         <span className="flex-1">Part / Description</span>
         <span className="w-14 text-center">Qty</span>
         <span className="hidden md:block w-40">Customer</span>
-        <span className="w-32 text-center">{embedded ? 'Status' : 'Action'}</span>
+        <span className="w-32 text-center">{pickerMode ? 'Select' : embedded ? 'Status' : 'Action'}</span>
       </div>
 
       {/* Job list */}
