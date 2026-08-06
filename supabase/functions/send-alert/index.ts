@@ -23,7 +23,7 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
   try {
-    const { poNumber, partNumber, message, employeeName, lineName, department } = await req.json()
+    const { kind, poNumber, partNumber, message, employeeName, lineName, department } = await req.json()
     const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? ''
     if (!RESEND_API_KEY) throw new Error('RESEND_API_KEY secret not set')
 
@@ -35,19 +35,34 @@ serve(async (req) => {
     const to = toStr.split(',').map(s => s.trim()).filter(Boolean)
     if (!to.length) throw new Error('Recipient list is empty after parsing')
 
+    // Two distinct looks so a reader can tell what they're looking at before
+    // reading a word of the body — a flagged issue (worker typed a free-text
+    // report) vs a hold (a real reason, the line is stopped right now).
+    const isHold = kind === 'hold'
+    const subjectPrefix = isHold ? '⛔ LINE ON HOLD' : '🚩 FLAGGED ISSUE'
+    const bannerBg    = isHold ? '#fff7ed' : '#fef2f2'
+    const bannerColor = isHold ? '#9a3412' : '#991b1b'
+    const bannerText  = isHold ? '⛔ LINE ON HOLD — production stopped' : '🚩 FLAGGED ISSUE — worker report'
+    const accentColor = isHold ? '#f97316' : '#dc2626'
+
     const res = await fetch('https://api.resend.com/emails', {
       method:  'POST',
       headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         from,
         to,
-        subject: `⚑ Job Issue — ${lineName ?? 'Shop Floor'} · PO ${poNumber}`,
+        subject: `${subjectPrefix} — ${lineName ?? 'Shop Floor'} · PO ${poNumber}`,
         html: `
-          <p><strong>Area:</strong> ${lineName ?? '—'}</p>
-          <p><strong>PO:</strong> ${poNumber} · ${partNumber}</p>
-          <p><strong>Raised by:</strong> ${employeeName}</p>
-          <p><strong>Message:</strong></p>
-          <p>${message.replace(/\n/g, '<br>')}</p>
+          <div style="border-left:4px solid ${accentColor};padding-left:14px">
+            <div style="display:inline-block;background:${bannerBg};color:${bannerColor};padding:6px 12px;border-radius:6px;font-weight:bold;font-size:13px;letter-spacing:.3px;margin-bottom:14px">
+              ${bannerText}
+            </div>
+            <p><strong>Area:</strong> ${lineName ?? '—'}</p>
+            <p><strong>PO:</strong> ${poNumber} · ${partNumber}</p>
+            <p><strong>Raised by:</strong> ${employeeName}</p>
+            <p><strong>${isHold ? 'Details' : 'Message'}:</strong></p>
+            <p>${message.replace(/\n/g, '<br>')}</p>
+          </div>
           <hr>
           <p style="color:#999;font-size:12px">SFM Job Tracker</p>
         `,

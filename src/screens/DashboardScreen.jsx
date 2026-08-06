@@ -409,7 +409,7 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
   }
 
   // ── Card actions ────────────────────────────────────────────────────────────
-  async function doPause(jobId, holdReason = null) {
+  async function doPause(jobId, holdReason = null, comment = null) {
     try {
       const ev = await pauseJob(employee.employee_id, jobId, holdReason)
       appendEvent(jobId, ev)
@@ -423,6 +423,7 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
             poNumber: job.po_number,
             partNumber: job.part_number,
             reasonLabel: HOLD_REASON_LABEL[holdReason] ?? holdReason,
+            comment,
             employeeName: employee.full_name,
             lineName: 'Weld Shop',
             department: 'weld',
@@ -737,7 +738,7 @@ export default function DashboardScreen({ employee, initialJobs, initialSplitMod
       )}
       {modal?.type === 'pause_reason' && (
         <PauseReasonModal
-          onConfirm={reason => { const id = modal.jobId; setModal(null); doPause(id, reason) }}
+          onConfirm={(reason, comment) => { const id = modal.jobId; setModal(null); doPause(id, reason, comment) }}
           onCancel={() => setModal(null)}
         />
       )}

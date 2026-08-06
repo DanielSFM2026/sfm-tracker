@@ -16,23 +16,57 @@ import { jobKey } from '../lib/plan'
 const INACTIVITY_MS = 120_000
 
 // ── Hold reason modal ─────────────────────────────────────────────────────────
+// onConfirm(reasonKey, comment|null) — assembly always has a real reason
+// (no "just pause" bypass here), so this always leads to a comment step.
 function HoldReasonModal({ onConfirm, onCancel }) {
+  const [reason, setReason] = useState(undefined)
+  const [comment, setComment] = useState('')
+
+  if (reason === undefined) {
+    return (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-6">
+        <div className="bg-stone-800 border border-stone-600 rounded-2xl p-6 w-full max-w-sm">
+          <h2 className="text-lg font-bold text-stone-100 mb-1">Hold Job</h2>
+          <p className="text-stone-500 text-sm mb-4">Select a reason</p>
+          <div className="space-y-2">
+            {HOLD_REASONS.map(r => (
+              <button key={r.key}
+                className="w-full text-left px-4 py-3 rounded-xl bg-stone-700 hover:bg-orange-900/40
+                           border border-stone-600 hover:border-orange-700 text-stone-200 text-sm"
+                onClick={() => setReason(r.key)}>
+                {r.label}
+              </button>
+            ))}
+          </div>
+          <button className="w-full mt-4 text-sm text-stone-500 underline" onClick={onCancel}>Cancel</button>
+        </div>
+      </div>
+    )
+  }
+
+  const label = HOLD_REASONS.find(r => r.key === reason)?.label ?? reason
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-6">
       <div className="bg-stone-800 border border-stone-600 rounded-2xl p-6 w-full max-w-sm">
-        <h2 className="text-lg font-bold text-stone-100 mb-1">Hold Job</h2>
-        <p className="text-stone-500 text-sm mb-4">Select a reason</p>
-        <div className="space-y-2">
-          {HOLD_REASONS.map(r => (
-            <button key={r.key}
-              className="w-full text-left px-4 py-3 rounded-xl bg-stone-700 hover:bg-orange-900/40
-                         border border-stone-600 hover:border-orange-700 text-stone-200 text-sm"
-              onClick={() => onConfirm(r.key)}>
-              {r.label}
-            </button>
-          ))}
+        <h2 className="text-lg font-bold text-stone-100 mb-1">Add a Comment?</h2>
+        <p className="text-stone-500 text-sm mb-4">
+          <span className="text-orange-400 font-semibold">{label}</span> — this will email the team.
+          Add any extra detail if it'll help (optional).
+        </p>
+        <textarea
+          autoFocus
+          rows={3}
+          value={comment}
+          onChange={e => setComment(e.target.value)}
+          placeholder="e.g. which part is missing, who to check with…"
+          className="w-full bg-stone-900 border border-stone-600 focus:border-orange-500 rounded-xl px-3 py-2.5 text-stone-100 text-sm outline-none placeholder-stone-600 mb-4"
+        />
+        <div className="flex gap-3">
+          <button className="flex-1 btn-ghost py-3" onClick={() => setReason(undefined)}>Back</button>
+          <button className="flex-1 btn-primary py-3" onClick={() => onConfirm(reason, comment.trim() || null)}>
+            Confirm Hold
+          </button>
         </div>
-        <button className="w-full mt-4 text-sm text-stone-500 underline" onClick={onCancel}>Cancel</button>
       </div>
     </div>
   )
@@ -694,7 +728,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
   }
 
   // ── Hold ──────────────────────────────────────────────────────────────────────
-  async function handleHoldConfirm(reason) {
+  async function handleHoldConfirm(reason, comment = null) {
     const { jobId } = modal
     setModal(null)
     const job       = jobs.find(j => j.job_id === jobId)
@@ -710,6 +744,7 @@ export default function AssemblyDashboard({ employee, breakRules: appBreakRules,
         poNumber: job.po_number,
         partNumber: job.part_number,
         reasonLabel: HOLD_REASON_LABEL[reason] ?? reason,
+        comment,
         employeeName: employee.full_name,
         lineName,
         department: 'assembly',
