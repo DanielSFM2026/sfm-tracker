@@ -357,13 +357,17 @@ export default function WeeklyPlanPanel({ department, title, operatorName, activ
         </div>
       </div>
 
-      {/* Summary tiles — each shown as a fraction of the week's total jobs */}
-      <div className="shrink-0 px-3 py-1.5 sm:py-2.5 grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2 border-b border-stone-800">
-        <Tile n={counts.wip}     total={counts.total} label="In progress"   stripe={STATE.wip.tile} />
-        <Tile n={counts.ready}   total={counts.total} label={ui.ready}       stripe={STATE.ready.tile} />
-        <Tile n={counts.waiting} total={counts.total} label={ui.waitLabel}   stripe={STATE.waiting.tile} />
-        <Tile n={counts.done}    total={counts.total} label={ui.done}        stripe={STATE.done.tile} />
-      </div>
+      {/* Summary tiles — manager view only. Dropped for the standard worker
+          view so more of the job list fits on screen while scrolling; the
+          header (week selector) and search stay either way. */}
+      {embedded && (
+        <div className="shrink-0 px-3 py-1.5 sm:py-2.5 grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2 border-b border-stone-800">
+          <Tile n={counts.wip}     total={counts.total} label="In progress"   stripe={STATE.wip.tile} />
+          <Tile n={counts.ready}   total={counts.total} label={ui.ready}       stripe={STATE.ready.tile} />
+          <Tile n={counts.waiting} total={counts.total} label={ui.waitLabel}   stripe={STATE.waiting.tile} />
+          <Tile n={counts.done}    total={counts.total} label={ui.done}        stripe={STATE.done.tile} />
+        </div>
+      )}
 
       {/* Search — scoped to the currently selected week only */}
       <div className="shrink-0 px-3 py-2 border-b border-stone-800">
